@@ -16,8 +16,16 @@ import os
 import random
 import pickle
 import csv
-from SA_utils import SeqFcnDataset, ProtDataModule, PTLModule, get_msa_from_fasta, ProtMSA, ProtDataModule, ConvVAE, compute_scores_from_batch
+from pathlib import Path
+import sys
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from models.round_3.round_3_models import SeqFcnDataset, PTLModule
+from models.VAE.ConvVAE import get_msa_from_fasta, ProtMSA, ConvVAE, compute_scores_from_batch
 from SA_utils import get_non_gap_indices, generate_all_point_mutants, mut2seq, find_top_n_mutations, generate_random_mut_non_gap_indices
+
 
 # Set up Amino Acid Dictionary of Indices
 AAs = 'ACDEFGHIKLMNPQRSTVWY-' # setup torchtext vocab to map AAs to indices, usage is aa2ind(list(AAsequence))
@@ -42,7 +50,7 @@ num_models = 100
 models = []
 for i in range(num_models):
     model = PTLModule(slen, learning_rate, epochs, weights)
-    checkpoint = torch.load(f'../models/round_3/model_ensemble/EnsMLP_PKC_Round_3_v0_{i}.ckpt')
+    checkpoint = torch.load(f'../models/round_3/model_ensemble/round_3_EnsMLP_{i}.ckpt')
     state_dict = checkpoint['state_dict']
     state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
     model.load_state_dict(state_dict)
@@ -57,7 +65,7 @@ epochs = 65
 learning_rate=0.0000075
 slen = len(WT)
 VAE = ConvVAE(slen, ks, nlatent, learning_rate)
-VAE.load_state_dict(torch.load('./models/VAE/VAE_weights.pt'))
+VAE.load_state_dict(torch.load('../models/VAE/VAE_weights.pt'))
 
 # Simulated Annealing Parameters
 type = 'C6' # Number of carbons in side chain of products
@@ -161,8 +169,8 @@ class SA_optimizer:
         print('Simulated Annealing Progress: ')
         seq = mut2seq(self.WT, start_mut)
         fit, MTFCNN_score, VAE_score = self.seq_fitness(seq)
-        current_seq = [start_mut, fit]  # Store the current sequence and its fitness
-        self.best_seq = [start_mut, fit]  # Store the best sequence and its fitness found so far
+        current_seq = [start_mut, fit, MTFCNN_score, VAE_score]  # Store the current sequence and its fitness
+        self.best_seq = [start_mut, fit, MTFCNN_score, VAE_score]  # Store the best sequence and its fitness found so far
         self.fitness_trajectory = [[fit, fit]]  # Store the trajectory of fitness values over time
 
         # for loop over decreasing temperatures
@@ -368,10 +376,10 @@ def mutating_window_rational_approach(non_gap_indices, WT_no_gaps, residues_with
     return AA_options
 
 # create SA_trials folder if it doesn't exist
-if not os.path.exists('R3_SA_Simulations'):
-    os.makedirs('R3_SA_Simulations')
+if not os.path.exists('SA_w_utopia_optimization'):
+    os.makedirs('SA_w_utopia_optimization')
 
-dir_path = f'R3_SA_Simulations/{type}_{num_mut}mut_{nsteps}steps'
+dir_path = f'SA_w_utopia_optimization/{type}_{num_mut}mut_{nsteps}steps'
 if not os.path.exists(dir_path):
     os.makedirs(dir_path)
 
