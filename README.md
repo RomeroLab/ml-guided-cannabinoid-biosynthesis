@@ -14,7 +14,7 @@ conda env create -f environment.yml
 conda activate running-simulated-annealing
 ````
 
-### 2. Run Pareto simulated annealing
+### 2. Run pareto simulated annealing
 
 From the repository root:
 
