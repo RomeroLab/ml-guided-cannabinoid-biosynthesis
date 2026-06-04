@@ -3,6 +3,31 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# ignore Mac junk
+*.DS_Store
+
+# ignore out files
+*.out
+
+# ignore notebook files
+*.ipynb
+
+# ignore structures
+./structures
+
+# ignore old scripts
+./scripts
+
+# ignore figures
+./figures
+
+# ignore model weights
+*.pt
+*.ckpt
+
+# ignore large image files
+*.svg
+
 # C extensions
 *.so
 

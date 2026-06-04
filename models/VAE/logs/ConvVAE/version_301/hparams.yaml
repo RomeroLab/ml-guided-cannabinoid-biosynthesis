@@ -1,0 +1,4 @@
+ks: 4
+learning_rate: 7.5e-06
+nlatent: 40
+slen: 128
