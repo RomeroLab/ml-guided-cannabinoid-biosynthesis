@@ -1,6 +1,3 @@
-Use this:
-
-````markdown
 ## Running simulated annealing
 
 This repository includes two simulated annealing workflows:
