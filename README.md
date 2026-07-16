@@ -342,3 +342,32 @@ Training logs are written under:
 models/round_3/logs/ensemble_results/version_<N>/
 ```
 
+---
+
+### Software requirements
+
+The repository uses the Conda environment defined in `environment.yml`.
+
+The workflows were designed to run on a standard research workstation or modern laptop.
+
+### Expected runtime
+
+Runtime depends on hardware, dataset size, batch size, early stopping, the number of ensemble members, the number of simulated-annealing steps, and the number of independent trials. The following values are approximate order-of-magnitude estimates rather than guaranteed benchmarks:
+
+| Workflow | Small functional test | Full deposited configuration |
+|---|---:|---:|
+| VAE training | minutes-a few hours |
+| Round 3 MLP ensemble training | minutes-a few hours |
+| Single-objective simulated annealing | < 1 hr / trial |
+| Pareto optimization | < 1 hr / trial |
+| Utopia optimization | < 1 hr / trial |
+
+For simulated annealing, total runtime scales approximately linearly with:
+
+```text
+number of trials × time / trial
+```
+
+The code provided here runs on CPU only. The accelerator flags can be changed to 'gpu' to train models faster.
+
+
