@@ -20,8 +20,8 @@ from ConvVAE import ProtDataModule, ConvVAE, get_msa_from_fasta
 # -----------------------------
 torch.set_num_threads(4)
 
-FASTA_PATH = "syn_query_clean_55.fasta"
-WEIGHTS_PATH = "syn_query_cleaned_reweights_55.npy"
+FASTA_PATH = "./model_data/syn_query_clean_55.fasta"
+WEIGHTS_PATH = "./model_data/syn_query_cleaned_reweights_55.npy"
 
 WT = (
     "MDAAKSQMAVKHLIVLKFKDEITEAQKEEFFKTYVNLVNKCIIPAMKDVYWLRSSGKLDVTQKNKEEGYTHIVEVTFESVETIQDYIIEHPAHVGFGDVYRSFWEKLLIFDYPSVLVTPRKIQLNSSY"
@@ -74,6 +74,7 @@ logger = CSVLogger(LOG_DIR, name=LOGGER_NAME)
 trainer = pl.Trainer(
     logger=logger,
     max_epochs=EPOCHS,
+    accelerator="cpu",
 )
 
 trainer.fit(model, data_module)
