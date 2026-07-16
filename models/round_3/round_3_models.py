@@ -82,29 +82,48 @@ class ProtDataModule(pl.LightningDataModule):
             val_indices = []
             test_indices = []
 
-            for cluster in self.data_df['Cluster'].unique():
-                # Get the indices of the rows in the DataFrame that belong to the current cluster
-                cluster_indices = self.data_df[self.data_df['Cluster'] == cluster].index.tolist()
-                # Check the size of the cluster
-                if len(cluster_indices) == 1:
-                    # Handle the case when the cluster has only one sample (e.g., add to training set)
-                    train_indices.extend(cluster_indices)
-                    continue
-                
-                # Split the cluster_indices into training and (validation + test) sets
-                train, temp, _, _ = train_test_split(cluster_indices, cluster_indices, test_size=0.2, random_state=2)
-                # Check the size of the cluster
-                if len(temp) == 1:
-                    # Handle the case when the cluster has only one sample (e.g., add to training set)
-                    val_indices.extend(cluster_indices)
-                    continue
-                
-                # Split the temporary set into validation and test sets
-                val, test, _, _ = train_test_split(temp, temp, test_size=0.5, random_state=2)
-                # Add the indices for the current cluster to the overall lists of indices
-                train_indices.extend(train)
-                val_indices.extend(val)
-                test_indices.extend(test)
+            if "Cluster" in self.data_df.columns:
+                for cluster in self.data_df['Cluster'].unique():
+                    # Get the indices of the rows in the DataFrame that belong to the current cluster
+                    cluster_indices = self.data_df[self.data_df['Cluster'] == cluster].index.tolist()
+                    # Check the size of the cluster
+                    if len(cluster_indices) == 1:
+                        # Handle the case when the cluster has only one sample (e.g., add to training set)
+                        train_indices.extend(cluster_indices)
+                        continue
+                    
+                    # Split the cluster_indices into training and (validation + test) sets
+                    train, temp, _, _ = train_test_split(cluster_indices, cluster_indices, test_size=0.2, random_state=2)
+                    # Check the size of the cluster
+                    if len(temp) == 1:
+                        # Handle the case when the cluster has only one sample (e.g., add to training set)
+                        val_indices.extend(cluster_indices)
+                        continue
+                    
+                    # Split the temporary set into validation and test sets
+                    val, test, _, _ = train_test_split(temp, temp, test_size=0.5, random_state=2)
+                    # Add the indices for the current cluster to the overall lists of indices
+                    train_indices.extend(train)
+                    val_indices.extend(val)
+                    test_indices.extend(test)
+
+            else:
+                # No Cluster column: perform a standard random 80/10/10 split
+                all_indices = self.data_df.index.tolist()
+
+                train_indices, temp_indices = train_test_split(
+                    all_indices,
+                    test_size=0.2,
+                    random_state=2,
+                    shuffle=True,
+                )
+
+                val_indices, test_indices = train_test_split(
+                    temp_indices,
+                    test_size=0.5,
+                    random_state=2,
+                    shuffle=True,
+                )
             
             # Shuffle the indices to ensure that the data from each cluster is mixed
             random.shuffle(train_indices)
