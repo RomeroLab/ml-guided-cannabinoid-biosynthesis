@@ -1,9 +1,20 @@
 ## Running simulated annealing
 
-This repository includes two simulated annealing workflows:
+We use two model objectives during sequence design:
 
-1. `scripts/simulated_annealing_w_pareto_optimization.py`
-2. `scripts/simulated_annealing_w_utopia_optimization.py`
+1. VAE evolutionary score
+2. Round 3 ensemble MLP score for either the C4 (divarnic acid) or C6 (olivetolic acid) product objective.
+
+Before Pareto or utopia optimization, run each objective separately to estimate the normalization endpoints for every unique combination of product type and mutation count.
+
+For example, we optimized each of these combinations using each model objective separately:
+
+```text
+C4 × 3 mutations
+C4 × 6 mutations
+C6 × 3 mutations
+C6 × 6 mutations
+```
 
 ### 1. Create the conda environment
 
@@ -12,41 +23,186 @@ From the repository root:
 ```bash
 conda env create -f environment.yml
 conda activate running-simulated-annealing
-````
+```
 
-### 2. Run pareto simulated annealing
+### 2. Run simulated annealing using only the VAE
+
+The VAE-only script `scripts/simulated_annealing_VAE_only_optimization.py` optimizes the raw VAE score during simulated annealing. After each trial, it evaluates the best VAE-optimized sequence with the ensemble MLP.
 
 From the repository root:
 
 ```bash
 cd scripts
-nohup python simulated_annealing_w_pareto_optimization.py > simulated_annealing_w_pareto_optimization.out 2>&1 &
+```
+
+Example for C4 with 6 mutations:
+
+```bash
+nohup python -u simulated_annealing_VAE_only_optimization.py \
+  --product-type C4 \
+  --num-mut 6 \
+  --num-trials 1 \
+  --seed 1 \
+  > VAE_only_C4_6mut.out 2>&1 &
 ```
 
 Monitor the run:
+
+```bash
+tail -f VAE_only_C4_6mut.out
+```
+
+The best VAE-only trial defines:
+
+VAE_Max:
+    VAE score of the best VAE-optimized sequence
+
+MTFCNN_Min:
+    Ensemble MLP score of that same VAE-optimized sequence
+
+
+### 3. Run simulated annealing using only the ensemble of MLPs
+
+The EnsMLP-only script `scripts/simulated_annealing_EnsMLP_only_optimization.py` optimizes the raw ensemble MLP score during simulated annealing. After each trial, it evaluates the best MLP-optimized sequence with the VAE.
+
+Example for C4 with 6 mutations:
+
+```bash
+nohup python -u simulated_annealing_EnsMLP_only_optimization.py \
+  --product-type C4 \
+  --num-mut 6 \
+  --num-trials 1 \
+  --seed 1 \
+  > EnsMLP_only_C4_6mut.out 2>&1 &
+```
+
+Monitor the run:
+
+```bash
+tail -f EnsMLP_only_C4_6mut.out
+```
+
+The best EnsMLP-only trial defines:
+
+MTFCNN_Max:
+    Ensemble MLP score of the best MLP-optimized sequence
+
+VAE_Min:
+    VAE score of that same MLP-optimized sequence
+
+### 4. Repeat for all design combinations
+
+Run both scripts for:
+
+```bash
+--product-type C4 --num-mut 3
+--product-type C4 --num-mut 6
+--product-type C6 --num-mut 3
+--product-type C6 --num-mut 6
+```
+
+Because simulated annealing is stochastic, use multiple independent trials for each objective and design combination. The scripts increment the supplied base seed across trials and report the best result in summary.json
+
+### 5. Locate the calibration results
+
+VAE-only outputs are written under:
+
+```text
+scripts/SA_single_objective/VAE_only/<TYPE>_<NUM_MUT>mut_<NSTEPS>steps/
+```
+
+EnsMLP-only outputs are written under:
+
+```text
+scripts/SA_single_objective/EnsMLP_only/<TYPE>_<NUM_MUT>mut_<NSTEPS>steps/
+```
+
+Each directory contains:
+
+```text
+trial_<N>_best.json
+trial_<N>_trajectory.csv
+trial_<N>_trajectory.png
+summary.json
+```
+
+The `summary.json` file from the VAE-only run reports:
+
+```json
+{
+  "normalization_endpoint": {
+    "VAE_Max": "...",
+    "MTFCNN_Min": "..."
+  }
+}
+```
+
+The `summary.json` file from the EnsMLP-only run reports:
+
+```json
+{
+  "normalization_endpoint": {
+    "MTFCNN_Max": "...",
+    "VAE_Min": "..."
+  }
+}
+```
+
+### 6. Add the bounds to the multi-objective scripts
+
+For each `(product type, num_mut)` combination, copy the four values into:
+
+```text
+scripts/simulated_annealing_w_pareto_optimization.py
+scripts/simulated_annealing_w_utopia_optimization.py
+```
+
+Set:
+
+```python
+VAE_Min = ...
+VAE_Max = ...
+MTFCNN_Min = ...
+MTFCNN_Max = ...
+```
+
+The multi-objective scripts normalize scores as:
+
+```python
+VAE_norm = (VAE_score - VAE_Min) / (VAE_Max - VAE_Min)
+
+MTFCNN_norm = (MTFCNN_score - MTFCNN_Min) / (MTFCNN_Max - MTFCNN_Min)
+```
+
+### 7. Run Pareto optimization
+
+After inserting the calibrated bounds:
+
+```bash
+nohup python -u simulated_annealing_w_pareto_optimization.py \
+  > simulated_annealing_w_pareto_optimization.out 2>&1 &
+```
+
+Monitor:
 
 ```bash
 tail -f simulated_annealing_w_pareto_optimization.out
 ```
 
-### 3. Run utopia simulated annealing
+### 8. Run utopia optimization
 
-From the repository root:
+After inserting the same calibrated bounds:
 
 ```bash
-cd scripts
-nohup python simulated_annealing_w_utopia_optimization.py > simulated_annealing_w_utopia_optimization.out 2>&1 &
+nohup python -u simulated_annealing_w_utopia_optimization.py \
+  > simulated_annealing_w_utopia_optimization.out 2>&1 &
 ```
 
-Monitor the run:
+Monitor:
 
 ```bash
 tail -f simulated_annealing_w_utopia_optimization.out
 ```
-
-### Notes
-
-The scripts save outputs to workflow-specific output directories. Outputs include parameter files, best-mutant pickle files, close-sequence pickle files, fitness trajectory CSV files, and trajectory plots.
 
 ---
 
