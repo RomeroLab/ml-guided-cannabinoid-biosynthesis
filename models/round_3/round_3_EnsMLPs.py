@@ -101,7 +101,7 @@ if train_models:
             save_top_k=1)
         early_stopping = EarlyStopping(monitor="val_loss", patience=200, mode="min")
         logger = CSVLogger('logs', name=log_filepath) # logger is a class instance that stores performance data to a csv after each epoch
-        trainer = pl.Trainer(logger=logger, max_epochs=epochs, callbacks=[checkpoint_callback, early_stopping], enable_progress_bar=True) # trainer is the class PTL uses for fitting a model and saving checkpoints
+        trainer = pl.Trainer(logger=logger, max_epochs=epochs, accelerator="cpu", callbacks=[checkpoint_callback, early_stopping], enable_progress_bar=True) # trainer is the class PTL uses for fitting a model and saving checkpoints
         trainer.fit(model, dm) ### errors will arise here if the dimensions are incorrectly defined
     
 # Plot loss curves
