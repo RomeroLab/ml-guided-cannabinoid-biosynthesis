@@ -93,7 +93,7 @@ BATCH_SIZE = 64
 KERNEL_SIZE = 4
 N_LATENT = 40
 EPOCHS = 50
-LEARNING_RATE = 7.5e-6 # this is an important hyperparameter is using a custom sequence dataset
+LEARNING_RATE = 7.5e-6 # this is an important hyperparameter to optimize if using your own MSA
 ```
 
 Modify these values in `Training_VAE.py` as needed.
