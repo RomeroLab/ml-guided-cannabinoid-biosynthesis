@@ -1,0 +1,54 @@
+[
+  {
+    "status": "ok",
+    "best_epoch": 2,
+    "validation_loss": 0.5313287377357483,
+    "validation_labels_present": true,
+    "train_counts": [
+      122,
+      121
+    ],
+    "scale": [
+      0.8799486631660728,
+      0.8366816130186628
+    ],
+    "parameters": 16746,
+    "fold": "through_0_to_1",
+    "method": "multi_task",
+    "member": 0
+  },
+  {
+    "status": "ok",
+    "best_epoch": 2,
+    "validation_loss": 0.36393845081329346,
+    "validation_labels_present": true,
+    "train_counts": [
+      122
+    ],
+    "scale": [
+      0.8799486631660728
+    ],
+    "parameters": 16737,
+    "fold": "through_0_to_1",
+    "method": "single_task",
+    "member": 0,
+    "target": "DVA/(DVA+DVO)"
+  },
+  {
+    "status": "ok",
+    "best_epoch": 2,
+    "validation_loss": 0.3252168595790863,
+    "validation_labels_present": true,
+    "train_counts": [
+      121
+    ],
+    "scale": [
+      0.8366816130186628
+    ],
+    "parameters": 16737,
+    "fold": "through_0_to_1",
+    "method": "single_task",
+    "member": 0,
+    "target": "OA/(OA+OL)"
+  }
+]

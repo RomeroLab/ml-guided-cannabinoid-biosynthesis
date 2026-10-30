@@ -1,0 +1,33 @@
+{
+  "input": "/workspace/ml-guided-cannabinoid-biosynthesis/data/all_SeqFxnData.csv",
+  "sha256": "3e1d5c283e5126f588c7fac78b1ae3c6f40228627ecff88fe99d151d78052775",
+  "mode": "audit",
+  "seed": 777,
+  "bootstrap": 2000,
+  "numpy": "1.24.4",
+  "pandas": "2.0.3",
+  "rows": 285,
+  "columns": 202,
+  "matched_summary_pairs": 453,
+  "numbered_prefixes_are": "assay-condition labels; not independent replicates",
+  "available": [
+    "metabolite summary means",
+    "reported standard deviations",
+    "reported ratio summary statistics"
+  ],
+  "not_established": [
+    "replicate identities/counts and pairing",
+    "biological versus technical replication",
+    "molar calibration/comparable metabolite response factors",
+    "LOD/LOQ and measurement units",
+    "replicate covariance needed for ratio error propagation"
+  ],
+  "limitations": [
+    "Summary CVs are descriptive; sample sizes and uncertainty are unavailable.",
+    "The stored ratio DVA/(DVA+DVO) or OA/(OA+OL) differs from a denominator including VDAL/PDAL.",
+    "No claim of noise suppression or molar selectivity follows from model prediction accuracy.",
+    "Near-zero means make CV unstable; min_mean is a user threshold, not an inferred analytical limit."
+  ],
+  "minimum_absolute_product_mean_for_cv": 0.0,
+  "minimum_absolute_ratio_mean_for_cv": 0.0
+}

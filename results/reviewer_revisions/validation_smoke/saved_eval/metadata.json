@@ -1,0 +1,61 @@
+{
+  "arguments": {
+    "data": "data/all_SeqFxnData.csv",
+    "out": "/workspace/revision-validation-smoke/saved_eval",
+    "mode": "saved",
+    "through_round": 3,
+    "train_through": 0,
+    "round_map": null,
+    "training_snapshot": null,
+    "saved_data": "models/round_1/round_1_seq_fxn_data.pkl",
+    "saved_splits": "models/round_1/round_1_data_splits.pkl",
+    "audit_only": false,
+    "folds": 5,
+    "identity": 0.9,
+    "pool_assays": false,
+    "targets": "4_DVA/(DVA+DVO),5_OA/(OA+OL)",
+    "epochs": 2,
+    "patience": 2,
+    "hidden": 8,
+    "embedding": 16,
+    "dropout": 0.2,
+    "learning_rate": 5e-06,
+    "weight_decay": 0.001,
+    "batch_size": 32,
+    "ensemble": 1,
+    "min_labels": 3,
+    "seed": 777,
+    "threads": 2
+  },
+  "files": {
+    "models/round_1/round_1_seq_fxn_data.pkl": "6438ddab4ec365bbb2b1e795f700ee688c3755462aa5e18738720acf0e2bddac",
+    "models/round_1/round_1_data_splits.pkl": "6c916294c8fa4dc3760fcc4594cb8f68180ddbec5a58fddb553ed5547724d358",
+    "/workspace/ml-guided-cannabinoid-biosynthesis/scripts/revisions/validate_models.py": "14fe88dd9cc2fbb2e34a4588d17537022c2f46a59fb48d1b8c1a0715affae530"
+  },
+  "round_mapping": {
+    "WT": 0,
+    "initial_library_1": 0,
+    "initial_library_2": 0,
+    "initial_library_3": 0,
+    "round_1": 1,
+    "round_2": 2,
+    "round_3_C4": 3,
+    "round_3_C6": 3
+  },
+  "temporal_purged_historical_names": null,
+  "snapshot_master_mismatches": 0,
+  "targets": [
+    "4_DVA/(DVA+DVO)",
+    "5_OA/(OA+OL)"
+  ],
+  "torch": "2.0.1+cpu",
+  "numpy": "1.24.4",
+  "pandas": "2.0.3",
+  "architecture": "embedding -> flatten -> linear -> dropout -> ReLU -> linear",
+  "scaling": "per-target max absolute TRAIN value only; missing labels masked; equal task mean loss",
+  "pooling_assumption": null,
+  "temporal_provenance": null,
+  "comparison": "same trunk and optimizer hyperparameters, independent heads; single-task total parameters exceed shared multi-task",
+  "legacy_saved_warning": "Original partitions may contain close neighbors or exact overlap; inspect splits.json",
+  "interpretation": "Smoke epochs are not scientific results. No test labels are used for selection or scaling."
+}

@@ -1,0 +1,70 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Reviewer experiment results</title><style>body{font:16px system-ui;max-width:1100px;margin:2rem auto;padding:1rem}table{border-collapse:collapse}th,td{padding:.4rem;border:1px solid #bbb}img{max-width:100%}aside{background:#fff3cf;padding:1rem}</style></head><body><h1>Reviewer experiment results</h1><aside>Retrospective measured-pool analyses. Combined scores did not uniformly outperform individual models. Full model training and real pLM inference remain unrun. Read START_HERE.md and results/README.md for limitations.</aside>
+<h2>Top 5 per round/product pool</h2>
+<table>
+<tr><th>product</th><th>hit_sd</th><th>method</th><th>n_round_pools</th><th>total_selected</th><th>hits_or_expected_random_hits</th><th>stratified_precision</th><th>expected_random_hits</th><th>enrichment_over_stratified_random</th></tr>
+<tr><td>C4</td><td>0</td><td>MLP</td><td>3</td><td>15</td><td>8.0</td><td>0.5333333333333333</td><td>6.684782608695652</td><td>1.1967479674796748</td></tr>
+<tr><td>C4</td><td>0</td><td>VAE</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>6.684782608695652</td><td>0.7479674796747967</td></tr>
+<tr><td>C4</td><td>0</td><td>combined_rank</td><td>3</td><td>15</td><td>7.0</td><td>0.4666666666666667</td><td>6.684782608695652</td><td>1.0471544715447154</td></tr>
+<tr><td>C4</td><td>0</td><td>pareto</td><td>3</td><td>15</td><td>7.0</td><td>0.4666666666666667</td><td>6.684782608695652</td><td>1.0471544715447154</td></tr>
+<tr><td>C4</td><td>0</td><td>random</td><td>3</td><td>15</td><td>6.684782608695652</td><td>0.4456521739130435</td><td>6.684782608695652</td><td>1.0</td></tr>
+<tr><td>C4</td><td>1</td><td>MLP</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.217391304347826</td><td>0.9583333333333334</td></tr>
+<tr><td>C4</td><td>1</td><td>VAE</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.217391304347826</td><td>0.9583333333333334</td></tr>
+<tr><td>C4</td><td>1</td><td>combined_rank</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.217391304347826</td><td>0.9583333333333334</td></tr>
+<tr><td>C4</td><td>1</td><td>pareto</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.217391304347826</td><td>0.9583333333333334</td></tr>
+<tr><td>C4</td><td>1</td><td>random</td><td>3</td><td>15</td><td>5.217391304347826</td><td>0.34782608695652173</td><td>5.217391304347826</td><td>1.0</td></tr>
+<tr><td>C6</td><td>0</td><td>MLP</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+<tr><td>C6</td><td>0</td><td>VAE</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+<tr><td>C6</td><td>0</td><td>combined_rank</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+<tr><td>C6</td><td>0</td><td>pareto</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+<tr><td>C6</td><td>0</td><td>random</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+<tr><td>C6</td><td>1</td><td>MLP</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+<tr><td>C6</td><td>1</td><td>VAE</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+<tr><td>C6</td><td>1</td><td>combined_rank</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+<tr><td>C6</td><td>1</td><td>pareto</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+<tr><td>C6</td><td>1</td><td>random</td><td>3</td><td>15</td><td>5.0</td><td>0.3333333333333333</td><td>5.0</td><td>1.0</td></tr>
+</table>
+<h3>round1_C4/hit_sd_0/ranking.png</h3><img src="ranking_suite_final/round1_C4/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round1_C4/hit_sd_1/ranking.png</h3><img src="ranking_suite_final/round1_C4/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+<h3>round1_C6/hit_sd_0/ranking.png</h3><img src="ranking_suite_final/round1_C6/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round1_C6/hit_sd_1/ranking.png</h3><img src="ranking_suite_final/round1_C6/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+<h3>round2_C4/hit_sd_0/ranking.png</h3><img src="ranking_suite_final/round2_C4/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round2_C4/hit_sd_1/ranking.png</h3><img src="ranking_suite_final/round2_C4/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+<h3>round2_C6/hit_sd_0/ranking.png</h3><img src="ranking_suite_final/round2_C6/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round2_C6/hit_sd_1/ranking.png</h3><img src="ranking_suite_final/round2_C6/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+<h3>round3_C4/hit_sd_0/ranking.png</h3><img src="ranking_suite_final/round3_C4/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round3_C4/hit_sd_1/ranking.png</h3><img src="ranking_suite_final/round3_C4/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+<h3>round3_C6/hit_sd_0/ranking.png</h3><img src="ranking_suite_final/round3_C6/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round3_C6/hit_sd_1/ranking.png</h3><img src="ranking_suite_final/round3_C6/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+<h2>Top 10 for rounds 1 and 2</h2>
+<table>
+<tr><th>product</th><th>hit_sd</th><th>method</th><th>n_round_pools</th><th>total_selected</th><th>hits_or_expected_random_hits</th><th>stratified_precision</th><th>expected_random_hits</th><th>enrichment_over_stratified_random</th></tr>
+<tr><td>C4</td><td>0</td><td>MLP</td><td>2</td><td>20</td><td>4.0</td><td>0.2</td><td>3.3695652173913047</td><td>1.1870967741935483</td></tr>
+<tr><td>C4</td><td>0</td><td>VAE</td><td>2</td><td>20</td><td>3.0</td><td>0.15</td><td>3.3695652173913047</td><td>0.8903225806451612</td></tr>
+<tr><td>C4</td><td>0</td><td>combined_rank</td><td>2</td><td>20</td><td>3.0</td><td>0.15</td><td>3.3695652173913047</td><td>0.8903225806451612</td></tr>
+<tr><td>C4</td><td>0</td><td>pareto</td><td>2</td><td>20</td><td>3.0</td><td>0.15</td><td>3.3695652173913047</td><td>0.8903225806451612</td></tr>
+<tr><td>C4</td><td>0</td><td>random</td><td>2</td><td>20</td><td>3.3695652173913047</td><td>0.16847826086956524</td><td>3.3695652173913047</td><td>1.0</td></tr>
+<tr><td>C4</td><td>1</td><td>MLP</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.43478260869565216</td><td>0.0</td></tr>
+<tr><td>C4</td><td>1</td><td>VAE</td><td>2</td><td>20</td><td>1.0</td><td>0.05</td><td>0.43478260869565216</td><td>2.3000000000000003</td></tr>
+<tr><td>C4</td><td>1</td><td>combined_rank</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.43478260869565216</td><td>0.0</td></tr>
+<tr><td>C4</td><td>1</td><td>pareto</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.43478260869565216</td><td>0.0</td></tr>
+<tr><td>C4</td><td>1</td><td>random</td><td>2</td><td>20</td><td>0.43478260869565216</td><td>0.021739130434782608</td><td>0.43478260869565216</td><td>1.0</td></tr>
+<tr><td>C6</td><td>0</td><td>MLP</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+<tr><td>C6</td><td>0</td><td>VAE</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+<tr><td>C6</td><td>0</td><td>combined_rank</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+<tr><td>C6</td><td>0</td><td>pareto</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+<tr><td>C6</td><td>0</td><td>random</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+<tr><td>C6</td><td>1</td><td>MLP</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+<tr><td>C6</td><td>1</td><td>VAE</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+<tr><td>C6</td><td>1</td><td>combined_rank</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+<tr><td>C6</td><td>1</td><td>pareto</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+<tr><td>C6</td><td>1</td><td>random</td><td>2</td><td>20</td><td>0.0</td><td>0.0</td><td>0.0</td><td></td></tr>
+</table>
+<h3>round1_C4/hit_sd_0/ranking.png</h3><img src="top10_rounds1_2/round1_C4/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round1_C4/hit_sd_1/ranking.png</h3><img src="top10_rounds1_2/round1_C4/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+<h3>round1_C6/hit_sd_0/ranking.png</h3><img src="top10_rounds1_2/round1_C6/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round1_C6/hit_sd_1/ranking.png</h3><img src="top10_rounds1_2/round1_C6/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+<h3>round2_C4/hit_sd_0/ranking.png</h3><img src="top10_rounds1_2/round2_C4/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round2_C4/hit_sd_1/ranking.png</h3><img src="top10_rounds1_2/round2_C4/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+<h3>round2_C6/hit_sd_0/ranking.png</h3><img src="top10_rounds1_2/round2_C6/hit_sd_0/ranking.png" alt="Ranking and budget plot">
+<h3>round2_C6/hit_sd_1/ranking.png</h3><img src="top10_rounds1_2/round2_C6/hit_sd_1/ranking.png" alt="Ranking and budget plot">
+</body></html>

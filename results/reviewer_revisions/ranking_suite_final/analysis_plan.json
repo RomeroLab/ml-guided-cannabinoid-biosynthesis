@@ -1,0 +1,49 @@
+{
+  "jobs": [
+    {
+      "round": 1,
+      "product": "C4",
+      "libraries": "round_1",
+      "outcome": "6_DVA/(DVA+DVO)",
+      "supervised_score": "round_1_ens_DVA/(DVA+DVO)"
+    },
+    {
+      "round": 1,
+      "product": "C6",
+      "libraries": "round_1",
+      "outcome": "7_OA/(OA+OL)",
+      "supervised_score": "round_1_ens_OA/(OA+OL)"
+    },
+    {
+      "round": 2,
+      "product": "C4",
+      "libraries": "round_2",
+      "outcome": "10_DVA/(DVA+DVO)",
+      "supervised_score": "round_2_ens_DVA/(DVA+DVO)"
+    },
+    {
+      "round": 2,
+      "product": "C6",
+      "libraries": "round_2",
+      "outcome": "11_OA/(OA+OL)",
+      "supervised_score": "round_2_ens_OA/(OA+OL)"
+    },
+    {
+      "round": 3,
+      "product": "C4",
+      "libraries": "round_3_C4",
+      "outcome": "12_DVA/(DVA+DVO)",
+      "supervised_score": "round_3_ens_DVA/(DVA+DVO)"
+    },
+    {
+      "round": 3,
+      "product": "C6",
+      "libraries": "round_3_C6",
+      "outcome": "13_OA/(OA+OL)",
+      "supervised_score": "round_3_ens_OA/(OA+OL)"
+    }
+  ],
+  "top_k": 5,
+  "seed": 777,
+  "warning": "Per-round assays and prior-round deposited models. Pooled results sum stratified selections, not predictions from an all-data trained model."
+}

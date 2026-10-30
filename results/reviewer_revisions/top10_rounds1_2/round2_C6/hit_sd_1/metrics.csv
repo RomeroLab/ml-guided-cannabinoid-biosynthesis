@@ -1,0 +1,6 @@
+method,n,k,pool_hits,hits,precision_at_k,recall_at_k,enrichment,below_WT_minus_SD_fraction_at_k,auroc_hit,average_precision_hit,auroc_low_outcome,spearman,random_pool_tail_p,random_pool_tail_p_holm,random_precision_low,random_precision_high
+VAE,11,10,0,0.0,0.0,,,1.0,,,,0.156332166556379,1.0,1.0,,
+MLP,11,10,0,0.0,0.0,,,1.0,,,,-0.4184184457832496,1.0,1.0,,
+combined_rank,11,10,0,0.0,0.0,,,1.0,,,,-0.30947625012581365,1.0,1.0,,
+pareto,11,10,0,0.0,0.0,,,1.0,,,,-0.13134198410556405,1.0,1.0,,
+random,11,10,0,,0.0,,,1.0,,,,,,,0.0,0.0

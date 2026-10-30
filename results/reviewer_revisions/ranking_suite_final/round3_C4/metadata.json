@@ -1,0 +1,75 @@
+{
+  "arguments": {
+    "data": "/workspace/ml-guided-cannabinoid-biosynthesis/data/all_SeqFxnData_with_predicted_scores.csv",
+    "out": "/workspace/revision-results/ranking_suite_final/round3_C4",
+    "outcome": "12_DVA/(DVA+DVO)",
+    "supervised_score": "round_3_ens_DVA/(DVA+DVO)",
+    "vae_score": "vae_score",
+    "libraries": "round_3_C4",
+    "wt_id": "PKC001.000",
+    "hit_sd": [
+      0.0,
+      1.0
+    ],
+    "training_snapshot": null,
+    "allow_training_overlap": false,
+    "extra_scores": null,
+    "extra_score_columns": [],
+    "top_k": 5,
+    "bootstrap_draws": 2000,
+    "bootstrap_unit": "parent",
+    "seed": 777,
+    "preflight_only": false
+  },
+  "inputs": {
+    "data": {
+      "path": "/workspace/ml-guided-cannabinoid-biosynthesis/data/all_SeqFxnData_with_predicted_scores.csv",
+      "sha256": "89358a51eccd240e949abc560bf3d09714be5f1a3117b1d451af1c1b14d1059a"
+    },
+    "training_snapshot": {
+      "path": "/workspace/ml-guided-cannabinoid-biosynthesis/models/round_3/round_3_seq_fxn_data.pkl",
+      "sha256": "f6da882f6772836b93955ae23530b64170d93d74cb2ea8ad63d8866097bb010a"
+    }
+  },
+  "command": [
+    "scripts/revisions/run_ranking_suite.py",
+    "--out",
+    "/workspace/revision-results/ranking_suite_final",
+    "--top-k",
+    "5"
+  ],
+  "versions": {
+    "numpy": "1.24.4",
+    "pandas": "2.0.3",
+    "scipy": "1.15.3",
+    "scikit-learn": "1.3.2"
+  },
+  "code_hashes": {
+    "/workspace/ml-guided-cannabinoid-biosynthesis/scripts/revisions/ranking_ablation.py": "cb29c624e008bbaf8c20deb464f8270f76ae70c2b8629db47eaade13415c01d2",
+    "/workspace/ml-guided-cannabinoid-biosynthesis/scripts/revisions/common.py": "5cf047a77f58032e9ec9573a4d6b79254650b1e8845ba8e85ba24de8954b1b75"
+  },
+  "requested_candidates": 10,
+  "final_candidates": 10,
+  "excluded_training": [],
+  "excluded_missing": [],
+  "wt_mean": 0.5875,
+  "wt_sd": 0.009574271,
+  "thresholds": [
+    {
+      "hit_sd": 0.0,
+      "threshold": 0.5875,
+      "pool_hits": 10
+    },
+    {
+      "hit_sd": 1.0,
+      "threshold": 0.597074271,
+      "pool_hits": 10
+    }
+  ],
+  "interpretation": "Retrospective within experimentally measured, selected candidates only. Not a prospective random-mutation comparison or causal ML benefit estimate.",
+  "score_provenance": "Deposited CSV scores; training overlap checked by canonical variant ID OR ungapped aligned sequence unless explicitly disabled. Early training snapshot sequences differ from current CSV for some IDs; verify historic score provenance independently.",
+  "bootstrap": "Fixed-selection paired bootstrap; parent clusters by default. No CI if fewer than 2 units. Does not include training, WT measurement, or threshold uncertainty. Sequence bootstrap assumes independent variants.",
+  "multiplicity": "Holm correction across methods vs finite-pool random null within each threshold/run only; not across assays or runs.",
+  "ties": "Average percentile ranks; lexicographic Enzyme tie-break independent of outcome.",
+  "ratio_warning": "Assay column used exactly as supplied; two-product ratios are not three-product fractions; no molar calibration inferred."
+}

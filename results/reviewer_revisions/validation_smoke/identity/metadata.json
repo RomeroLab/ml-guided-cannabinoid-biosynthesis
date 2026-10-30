@@ -1,0 +1,60 @@
+{
+  "arguments": {
+    "data": "data/all_SeqFxnData.csv",
+    "out": "/workspace/revision-validation-smoke/identity",
+    "mode": "identity",
+    "through_round": 0,
+    "train_through": 0,
+    "round_map": null,
+    "training_snapshot": null,
+    "saved_data": null,
+    "saved_splits": null,
+    "audit_only": false,
+    "folds": 3,
+    "identity": 0.99,
+    "pool_assays": false,
+    "targets": "4_DVA/(DVA+DVO),5_OA/(OA+OL)",
+    "epochs": 2,
+    "patience": 2,
+    "hidden": 8,
+    "embedding": 16,
+    "dropout": 0.2,
+    "learning_rate": 5e-06,
+    "weight_decay": 0.001,
+    "batch_size": 32,
+    "ensemble": 1,
+    "min_labels": 3,
+    "seed": 777,
+    "threads": 2
+  },
+  "files": {
+    "data/all_SeqFxnData.csv": "3e1d5c283e5126f588c7fac78b1ae3c6f40228627ecff88fe99d151d78052775",
+    "/workspace/ml-guided-cannabinoid-biosynthesis/scripts/revisions/validate_models.py": "9393e6d2c52371efcac0a460e0f8ed251e6d12eacc588f147ad2a54b46f0e715"
+  },
+  "round_mapping": {
+    "WT": 0,
+    "initial_library_1": 0,
+    "initial_library_2": 0,
+    "initial_library_3": 0,
+    "round_1": 1,
+    "round_2": 2,
+    "round_3_C4": 3,
+    "round_3_C6": 3
+  },
+  "temporal_purged_historical_names": null,
+  "snapshot_master_mismatches": 0,
+  "targets": [
+    "4_DVA/(DVA+DVO)",
+    "5_OA/(OA+OL)"
+  ],
+  "torch": "2.0.1+cpu",
+  "numpy": "1.24.4",
+  "pandas": "2.0.3",
+  "architecture": "embedding -> flatten -> linear -> dropout -> ReLU -> linear",
+  "scaling": "per-target max absolute TRAIN value only; missing labels masked; equal task mean loss",
+  "pooling_assumption": null,
+  "temporal_provenance": null,
+  "comparison": "same trunk and optimizer hyperparameters, independent heads; single-task total parameters exceed shared multi-task",
+  "legacy_saved_warning": "Original partitions may contain close neighbors or exact overlap; inspect splits.json",
+  "interpretation": "Smoke epochs are not scientific results. No test labels are used for selection or scaling."
+}

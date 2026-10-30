@@ -1,0 +1,4 @@
+left,right,precision_difference,ci_low,ci_high,valid_bootstraps,bootstrap_unit,n_units
+combined_rank,VAE,0.2,,,0,parent,1
+combined_rank,MLP,0.0,,,0,parent,1
+combined_rank,pareto,0.0,,,0,parent,1
