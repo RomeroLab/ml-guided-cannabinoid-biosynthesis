@@ -1,0 +1,37 @@
+{
+  "arguments": {
+    "input": "/home/nlb51/Project_0_OAC/ml-guided-cannabinoid-biosynthesis/data/all_SeqFxnData_with_predicted_scores.csv",
+    "output_dir": "/home/nlb51/Project_0_OAC/ml-guided-cannabinoid-biosynthesis/results/esm2_comparison",
+    "sequence_column": "Sequence",
+    "device": "cuda",
+    "mask_batch_size": 8,
+    "cpu_threads": 4,
+    "analysis_only": false,
+    "top_k": 10,
+    "wt_id": "PKC001.000",
+    "hd_min": 1,
+    "hd_max": 8,
+    "input_titer_unit": "uM",
+    "titer_hit_delta": 0.0,
+    "fraction_hit_delta": 0.0
+  },
+  "algorithm": "masked_pll_mean_natural_log_v1",
+  "models": {
+    "esm2_35M": "facebook/esm2_t12_35M_UR50D",
+    "esm2_650M": "facebook/esm2_t33_650M_UR50D"
+  },
+  "prefixes": {
+    "OA": [
+      7,
+      11,
+      13
+    ],
+    "DVA": [
+      6,
+      10,
+      12
+    ]
+  },
+  "input_sha256": "89358a51eccd240e949abc560bf3d09714be5f1a3117b1d451af1c1b14d1059a",
+  "definitions_and_caveats": "ESM-2 masked pseudo-log-likelihood and retrospective Figure 3d/e comparison.\n\nCreate the supplied Linux/NVIDIA server environment (nothing is installed here):\n    conda env create -f esm2.yml\n    conda activate esm2-scoring\nRun from the repository root:\n    python scripts/adding_esm2_scores.py --device cuda\nResume by rerunning the same command; completed sequence/model pairs are cached.\n    python scripts/adding_esm2_scores.py --analysis-only\n\nScoring: mask one residue at a time, log P(original residue | all OTHER residues),\nthen average over residues (natural log; higher is better). This is length-normalized\nmasked pseudo-log-likelihood, NOT an unmasked reconstruction likelihood or a\nWT-marginal mutation score. Gaps '-' and '.' and whitespace are removed. Nonstandard\nresidues fail explicitly. Identical ungapped sequences share one calculation.\n\nFigure 3d/e preparation reproduced from cell 52 of\nFigure_3_updated_for_units_and_dots.ipynb, inspected 2026-11-17:\nOA primary prefixes 7/11/13, DVA 6/10/12; WT PKC001.000; hd 1..8.\nFraction = stored OA/C6 or DVA/C4, not recomputed from mean titers.\nDelta fraction = 100*(variant - same-screen WT), in percentage points.\nDelta titer = (variant - same-screen WT)*MW/1000 in mg/L assuming input uM.\nNo dilution correction. Prefixes 8/9 are validation, not extra round-1 variants.\n\nRounds 1, 2 and 3 are analyzed SEPARATELY because strains/assays differ.\nNo cross-round pooling or averaging is performed. Within each analyte/round,\nk counts unique enzymes and comparisons use a common finite-score cohort.\nMean and maximum change curves are reported. With score ties the plotted values\nare exact expectations under uniformly randomized tie breaking, including the\nmaximum (not the maximum over every partially selected tied candidate).\nHit = outcome strictly above same-screen WT (delta > 0 by default); this is an\noperational improvement, NOT a significance test. Enrichment = top-k hit rate / full\neligible cohort hit rate. Top-k score ties receive fractional membership, so results\nare the exact expected means/hits for uniformly broken ties, not arbitrary row order.\nCorrelation p-values are nominal/descriptive, with no multiple-testing correction. This is retrospective\nranking of experimentally selected variants, not prospective validation.\n"
+}

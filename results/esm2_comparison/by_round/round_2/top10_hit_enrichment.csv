@@ -1,0 +1,13 @@
+Analyte,Round,target,score,n,requested_k,effective_k,hit_delta_threshold,expected_hits,hit_rate,population_hit_rate,enrichment
+DVA,2,Titer_delta_mg_L,vae_score,22,10,10,0.0,2.0,0.2,0.36363636363636365,0.55
+DVA,2,Titer_delta_mg_L,esm2_35M,22,10,10,0.0,4.0,0.4,0.36363636363636365,1.1
+DVA,2,Titer_delta_mg_L,esm2_650M,22,10,10,0.0,2.0,0.2,0.36363636363636365,0.55
+DVA,2,Fraction_change_pp,vae_score,23,10,10,0.0,1.0,0.1,0.13043478260869565,0.7666666666666667
+DVA,2,Fraction_change_pp,esm2_35M,23,10,10,0.0,1.0,0.1,0.13043478260869565,0.7666666666666667
+DVA,2,Fraction_change_pp,esm2_650M,23,10,10,0.0,1.0,0.1,0.13043478260869565,0.7666666666666667
+OA,2,Titer_delta_mg_L,vae_score,12,10,10,0.0,0.0,0.0,0.0,
+OA,2,Titer_delta_mg_L,esm2_35M,12,10,10,0.0,0.0,0.0,0.0,
+OA,2,Titer_delta_mg_L,esm2_650M,12,10,10,0.0,0.0,0.0,0.0,
+OA,2,Fraction_change_pp,vae_score,12,10,10,0.0,0.0,0.0,0.0,
+OA,2,Fraction_change_pp,esm2_35M,12,10,10,0.0,0.0,0.0,0.0,
+OA,2,Fraction_change_pp,esm2_650M,12,10,10,0.0,0.0,0.0,0.0,
