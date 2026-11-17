@@ -1,0 +1,23 @@
+# Linux x86_64 NVIDIA GPU environment; CUDA 12.1 runtime.
+# Requires a CUDA-12.1-compatible NVIDIA driver (Linux >=525.60.13).
+# This file is for the GPU server, not the Mac. No system CUDA toolkit required.
+# conda env create -f esm2.yml
+# conda activate esm2-scoring
+# python scripts/adding_esm2_scores.py --device cuda --mask-batch-size 8
+name: esm2-scoring
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pytorch=2.5.1
+  - pytorch-cuda=12.1
+  - numpy=1.26.4
+  - pandas=2.2.3
+  - scipy=1.14.1
+  - matplotlib=3.9.2
+  - pip
+  - pip:
+      - transformers==4.46.3
+      - safetensors>=0.4.3,<1
