@@ -6,7 +6,9 @@ Create the supplied Linux/NVIDIA server environment (nothing is installed here):
     conda activate esm2-scoring
 Run from the repository root:
     python scripts/adding_esm2_scores.py --device cuda
-Resume by rerunning the same command; completed sequence/model pairs are cached.
+An existing all_SeqFxnData_with_esm2_scores.csv is reused without any model loading.
+Use --scored-input PATH to choose it explicitly. Incomplete/inconsistent files fail
+without rescoring. When no scored CSV exists, completed pairs resume from cache.
     python scripts/adding_esm2_scores.py --analysis-only
 
 Scoring: mask one residue at a time, log P(original residue | all OTHER residues),
@@ -35,6 +37,22 @@ eligible cohort hit rate. Top-k score ties receive fractional membership, so res
 are the exact expected means/hits for uniformly broken ties, not arbitrary row order.
 Correlation p-values are nominal/descriptive, with no multiple-testing correction. This is retrospective
 ranking of experimentally selected variants, not prospective validation.
+
+Utopia scores combine VAE with each ESM separately using equal-weight Euclidean
+closeness to (1,1): -sqrt((1-VAE_norm)^2 + (1-ESM_norm)^2); higher is better.
+Each component is min-max normalized within the analyte/round finite-base-score
+cohort, before endpoint-specific missing-outcome filtering. Constant components
+are assigned 1 (uninformative). Bounds use model scores only, not measured outcomes.
+These retrospective cohort bounds are not the calibrated simulated-annealing
+endpoints of the paper. Bounds and per-variant utopia scores/ranks are exported.
+Spearman summary bars are unweighted arithmetic means of valid round-level
+coefficients, with each round shown as a point; no measurements are pooled.
+Pearson coefficients remain in CSV tables; no Pearson figures are generated.
+Top-k figures have rounds as rows and metabolites as columns, one per endpoint.
+Enrichment is saved only as numeric tables, not plotted. All outputs are saved
+directly in results/esm2_comparison (or --output-dir); no round subfolders are created.
+Combined CSVs retain the Round column so observations remain separate.
+Figures are PNG and SVG only. Existing output files are left untouched unless rewritten.
 """
 from __future__ import annotations
 
@@ -52,12 +70,18 @@ MODEL_IDS = {
     'esm2_35M': 'facebook/esm2_t12_35M_UR50D',
     'esm2_650M': 'facebook/esm2_t33_650M_UR50D',
 }
-SCORES = ['vae_score', 'esm2_35M', 'esm2_650M']
+BASE_SCORES = ['vae_score', 'esm2_35M', 'esm2_650M']
+SCORES = BASE_SCORES + ['utopia_35M', 'utopia_650M']
 PREFIXES = {'OA': [7, 11, 13], 'DVA': [6, 10, 12]}
 MW = {'OA': 224.25, 'DVA': 196.2}
 TARGETS = {'Titer_delta_mg_L': 'Titer change relative to CsOAC (mg/L)',
            'Fraction_change_pp': 'Fraction change relative to CsOAC (percentage points)'}
-COLORS = {'vae_score': '#009E73', 'esm2_35M': '#0072B2', 'esm2_650M': '#D55E00'}
+# Cellibre paper families: VAE blue, model-only magenta, utopia green.
+COLORS = {'vae_score': '#4477AA', 'esm2_35M': '#AA3377', 'esm2_650M': '#CC79A7',
+          'utopia_35M': '#228833', 'utopia_650M': '#66AA55'}
+LABELS = {'vae_score': 'VAE-only', 'esm2_35M': 'ESM-2 35M-only',
+          'esm2_650M': 'ESM-2 650M-only', 'utopia_35M': 'VAE + ESM-2 35M utopia',
+          'utopia_650M': 'VAE + ESM-2 650M utopia'}
 ALGORITHM = 'masked_pll_mean_natural_log_v1'
 
 
@@ -176,6 +200,60 @@ def attach_cached_scores(frame, output):
     return frame
 
 
+def reuse_scored_csv(frame, path, sequence_column):
+    """Reuse by enzyme + exact ungapped sequence; never fill missing scores by inference."""
+    scored = read_input(path, sequence_column)
+    missing = set(MODEL_IDS) - set(scored)
+    if missing:
+        raise ValueError(f'{path}: missing score columns {sorted(missing)}; no rescoring performed.')
+    for col in MODEL_IDS:
+        scored[col] = pd.to_numeric(scored[col], errors='raise')
+    if set(frame.Enzyme) != set(scored.Enzyme):
+        raise ValueError('Scored CSV enzyme IDs differ from input; choose a matching --input/--scored-input. No rescoring.')
+    indexed = scored.set_index('Enzyme').loc[frame.Enzyme]
+    if not np.array_equal(indexed.sequence_ungapped.to_numpy(), frame.sequence_ungapped.to_numpy()):
+        raise ValueError('Scored CSV sequences differ from input; no rescoring performed.')
+    if not np.isfinite(indexed[list(MODEL_IDS)].to_numpy(float)).all():
+        raise ValueError('Scored CSV contains missing/nonfinite ESM scores; no rescoring performed.')
+    for col in MODEL_IDS:
+        frame[col] = indexed[col].to_numpy()
+    return frame
+
+
+def find_scored_csv(args, output):
+    if args.scored_input is not None:
+        if not args.scored_input.is_file():
+            raise FileNotFoundError(f'Explicit scored CSV missing: {args.scored_input}; no inference.')
+        return args.scored_input
+    name = 'all_SeqFxnData_with_esm2_scores.csv'
+    candidates = [args.input] if args.input.name == name else []
+    candidates += [output / name, args.input.parent / name, Path.cwd() / name]
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def add_utopia_scores(observations):
+    """Model-only min-max bounds per analyte/round, independent of measured endpoint."""
+    result = observations.copy()
+    bounds = []
+    for (analyte, round_number), indices in result.groupby(['Analyte', 'Round']).groups.items():
+        group = result.loc[indices]
+        finite = np.isfinite(group[BASE_SCORES].to_numpy(float)).all(axis=1)
+        good = group.index[finite]
+        normalized = {}
+        for score in BASE_SCORES:
+            values = group.loc[good, score].to_numpy(float)
+            low, high = (float(values.min()), float(values.max())) if len(values) else (np.nan, np.nan)
+            normalized[score] = (values - low) / (high - low) if high > low else np.ones(len(values))
+            bounds.append(dict(Analyte=analyte, Round=round_number, score=score,
+                               minimum=low, maximum=high, n=len(values), constant=bool(high == low)))
+        for size in ['35M', '650M']:
+            col = f'utopia_{size}'
+            result.loc[good, col] = -np.sqrt((1 - normalized['vae_score']) ** 2
+                                           + (1 - normalized[f'esm2_{size}']) ** 2)
+            result.loc[indices, col + '_rank'] = result.loc[indices, col].rank(ascending=False, method='min')
+    return result, pd.DataFrame(bounds)
+
+
 def prepare_observations(frame, args):
     wt = frame.loc[frame['Enzyme'].eq(args.wt_id)]
     if len(wt) != 1:
@@ -189,7 +267,7 @@ def prepare_observations(frame, args):
             if not (np.isfinite(wt_t) and np.isfinite(wt_f) and 0 < wt_f <= 1):
                 raise ValueError(f'Invalid WT baseline for prefix {prefix}')
             scale = MW[analyte] / 1000 if args.input_titer_unit == 'uM' else 1.0
-            part = frame[['Enzyme', 'hd', 'sequence_ungapped'] + SCORES + [titer, fraction]].copy()
+            part = frame[['Enzyme', 'hd', 'sequence_ungapped'] + BASE_SCORES + [titer, fraction]].copy()
             part = part.rename(columns={titer: 'Titer_input', fraction: 'Fraction'})
             for col in ['Titer_input', 'Fraction']:
                 part[col] = pd.to_numeric(part[col], errors='raise')
@@ -276,58 +354,98 @@ def evaluate(data, args):
     return pd.DataFrame(correlations), pd.DataFrame(enrichment), pd.DataFrame(curves), pd.concat(selections, ignore_index=True)
 
 
-def plot_results(correlations, enrichment, curves, args, output):
+def plot_results(correlations, curves, output):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    plt.rcParams.update({'font.size': 9, 'pdf.fonttype': 42, 'svg.fonttype': 'none'})
-    # Separate files per round avoid conflating strain/assay differences.
-    for round_number in [1, 2, 3]:
-        round_dir = output / f'round_{round_number}'
-        round_dir.mkdir(parents=True, exist_ok=True)
-        round_curves = curves.loc[curves.Round == round_number]
-        for stat in ['mean', 'max']:
-            fig, axes = plt.subplots(2, 2, figsize=(10, 7), squeeze=False)
-            for i, analyte in enumerate(['OA', 'DVA']):
-                for j, (target, label) in enumerate(TARGETS.items()):
-                    ax = axes[i, j]
-                    subset = round_curves.loc[(round_curves.Analyte == analyte) & (round_curves.target == target)]
-                    for score in SCORES:
-                        part = subset.loc[subset.score == score]
-                        ax.plot(part.k, part[f'{stat}_delta'], color=COLORS[score], label=score)
-                    if stat == 'mean' and len(subset):
-                        ax.axhline(subset.population_mean_delta.iloc[0], color='grey', ls=':',
-                                   label='Random-selection expectation')
-                    ax.axhline(0, color='black', lw=.6)
-                    ax.set(title=f'{analyte}, Round {round_number}', xlabel='Number of selected variants (k)',
-                           ylabel=('Mean ' if stat == 'mean' else 'Maximum ') + label.lower())
-                    ax.spines[['top', 'right']].set_visible(False)
-            axes[0, 0].legend(frameon=False, fontsize=8)
-            fig.tight_layout()
-            for ext in ['png', 'pdf', 'svg']:
-                fig.savefig(round_dir / f'topk_{stat}_changes.{ext}', dpi=300)
-            plt.close(fig)
-        for metric in ['spearman', 'pearson', 'enrichment']:
-            fig, axes = plt.subplots(1, 2, figsize=(9, 3.5))
-            for ax, analyte in zip(axes, ['OA', 'DVA']):
-                for j, score in enumerate(SCORES):
-                    vals = []
-                    for target in TARGETS:
-                        table = enrichment if metric == 'enrichment' else correlations.loc[correlations.method == metric]
-                        row = table.loc[(table.Analyte == analyte) & (table.Round == round_number)
-                                        & (table.target == target) & (table.score == score)]
-                        vals.append(float(row.iloc[0]['enrichment' if metric == 'enrichment' else 'coefficient']) if len(row) else np.nan)
-                    ax.bar(np.arange(2) + (j-1)*.24, vals, width=.24, color=COLORS[score], label=score)
-                ax.set_xticks([0, 1], ['Titer change', 'Fraction change'])
-                ax.set(title=f'{analyte}, Round {round_number}',
-                       ylabel=f'Top-{args.top_k} enrichment' if metric == 'enrichment' else f'{metric.title()} correlation')
-                ax.axhline(1 if metric == 'enrichment' else 0, color='grey', ls=':', lw=.8)
+    from matplotlib.lines import Line2D
+    from matplotlib.ticker import MaxNLocator
+    plt.rcParams.update({'font.size': 9, 'svg.fonttype': 'none'})
+    method_handles = [Line2D([0], [0], color=COLORS[s], lw=2, label=LABELS[s]) for s in SCORES]
+
+    def save(fig, stem):
+        for extension in ['png', 'svg']:
+            fig.savefig(stem.with_suffix('.' + extension), dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    # Average coefficients, never pool observations from different rounds.
+    for metric in ['pearson', 'spearman']:
+        table = correlations.loc[correlations.method == metric]
+        if metric == 'pearson':
+            summary = table.groupby(['Analyte', 'target', 'score'], as_index=False).agg(
+                mean_coefficient=('coefficient', 'mean'), valid_rounds=('coefficient', 'count'))
+            summary['method'] = metric
+            summary.to_csv(output / f'{metric}_round_mean_summary.csv', index=False)
+            continue
+        summary_rows = []
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8), squeeze=False)
+        markers = {1: 'o', 2: 's', 3: '^'}
+        for i, analyte in enumerate(['OA', 'DVA']):
+            for j, target in enumerate(TARGETS):
+                ax = axes[i, j]
+                for x, score in enumerate(SCORES):
+                    part = table.loc[(table.Analyte == analyte) & (table.target == target) & (table.score == score)]
+                    values = part.coefficient.to_numpy(float)
+                    finite = values[np.isfinite(values)]
+                    mean = float(finite.mean()) if len(finite) else np.nan
+                    summary_rows.append(dict(Analyte=analyte, target=target, score=score,
+                                             method=metric, mean_coefficient=mean, valid_rounds=len(finite)))
+                    ax.bar(x, mean, color=COLORS[score], alpha=.45, width=.66, zorder=2)
+                    for row in part.itertuples():
+                        if np.isfinite(row.coefficient):
+                            ax.scatter(x + (row.Round - 2)*.13, row.coefficient,
+                                       marker=markers[row.Round], s=34, color=COLORS[score],
+                                       edgecolor='black', linewidth=.45, zorder=3)
+                ax.axhline(0, color='grey', lw=.7)
+                ax.set(title=f'{analyte}: {"titer" if j == 0 else "fraction"} change',
+                       ylabel=f'{metric.title()} correlation', ylim=(-1.05, 1.05))
+                ax.set_xticks(range(len(SCORES)), [LABELS[s].replace(' utopia', '\nutopia') for s in SCORES],
+                              rotation=25, ha='right')
                 ax.spines[['top', 'right']].set_visible(False)
-            axes[0].legend(frameon=False, fontsize=8)
-            fig.tight_layout()
-            fig.savefig(round_dir / f'{metric}.png', dpi=300)
-            fig.savefig(round_dir / f'{metric}.pdf')
-            plt.close(fig)
+        round_handles = [Line2D([0], [0], marker=markers[r], color='black', linestyle='', label=f'Round {r}') for r in [1,2,3]]
+        fig.legend(handles=round_handles, loc='lower center', ncol=3, frameon=False)
+        fig.suptitle('Bars: unweighted mean across available rounds; points: individual rounds')
+        fig.tight_layout(rect=(0, .055, 1, .96))
+        save(fig, output / f'{metric}_all_rounds')
+        pd.DataFrame(summary_rows).to_csv(output / f'{metric}_round_mean_summary.csv', index=False)
+
+    # One figure per endpoint: rows are separate rounds, columns are metabolites.
+    for target, label in TARGETS.items():
+        fig, axes = plt.subplots(3, 2, figsize=(12, 12), squeeze=False)
+        for row_index, round_number in enumerate([1, 2, 3]):
+            for column_index, analyte in enumerate(['OA', 'DVA']):
+                ax = axes[row_index, column_index]
+                subset = curves.loc[(curves.Round == round_number) & (curves.Analyte == analyte)
+                                    & (curves.target == target)]
+                for score in SCORES:
+                    part = subset.loc[subset.score == score]
+                    for stat, style, marker in [('max', '-', '^'), ('mean', (0, (5, 3)), 'o')]:
+                        ax.plot(part.k, part[f'{stat}_delta'], color=COLORS[score], linestyle=style,
+                                marker=marker, markersize=3, markevery=max(1, len(part)//15), linewidth=1.8)
+                if len(subset):
+                    ax.axhline(subset.population_mean_delta.iloc[0], color='grey', ls=':', lw=1.3)
+                ax.axhline(0, color='black', ls='--', lw=.8)
+                ax.set(title=f'Round {round_number}: {analyte}',
+                       xlabel='Number of selected variants (k)',
+                       ylabel=label.replace(' (', '\n('))
+                ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+                ax.spines[['top', 'right']].set_visible(False)
+                ax.grid(axis='y', alpha=.2)
+        stat_handles = [Line2D([0], [0], color='#444444', lw=1.8, linestyle=style,
+                              marker=marker, label=stat) for stat, style, marker in
+                        [('Maximum', '-', '^'), ('Mean', (0, (5, 3)), 'o')]]
+        baseline_handles = [Line2D([0], [0], color='grey', ls=':', lw=1.3,
+                                   label='Random: expected mean'),
+                            Line2D([0], [0], color='black', ls='--', lw=.8,
+                                   label='CsOAC baseline')]
+        fig.legend(handles=method_handles + stat_handles + baseline_handles,
+                   loc='lower center', ncol=3, frameon=False, fontsize=9,
+                   bbox_to_anchor=(.5, .005))
+        fig.suptitle('Mean and maximum WT-relative changes; rounds analyzed separately')
+        fig.tight_layout(rect=(0, .09, 1, .97))
+        suffix = 'titer' if target == 'Titer_delta_mg_L' else 'fraction'
+        save(fig, output / f'topk_max_mean_{suffix}_all_rounds')
+
 
 
 def parse_args():
@@ -336,6 +454,7 @@ def parse_args():
     p.add_argument('--input', type=Path, default=root / 'data/all_SeqFxnData_with_predicted_scores.csv')
     p.add_argument('--output-dir', type=Path, default=root / 'results/esm2_comparison')
     p.add_argument('--sequence-column', default='Sequence')
+    p.add_argument('--scored-input', type=Path, help='Existing scored CSV to reuse; never triggers inference if invalid')
     p.add_argument('--device', default='cuda')
     p.add_argument('--mask-batch-size', type=int, default=8)
     p.add_argument('--cpu-threads', type=int, default=4)
@@ -363,31 +482,33 @@ def main():
     validation_frame = frame.assign(esm2_35M=np.nan, esm2_650M=np.nan)
     prepare_observations(validation_frame, args)
     del validation_frame
-    frame = attach_cached_scores(frame, output) if args.analysis_only else score_sequences(frame, args, output)
-    frame.to_csv(output / 'all_SeqFxnData_with_esm2_scores.csv', index=False)
+    scored_path = find_scored_csv(args, output)
+    if scored_path is not None:
+        print(f'Reusing {scored_path}; no model loading or rescoring.', flush=True)
+        frame = reuse_scored_csv(frame, scored_path, args.sequence_column)
+    else:
+        frame = attach_cached_scores(frame, output) if args.analysis_only else score_sequences(frame, args, output)
+        frame.to_csv(output / 'all_SeqFxnData_with_esm2_scores.csv', index=False)
     observations, baselines = prepare_observations(frame, args)
-    analysis_dir = output / 'by_round'
-    analysis_dir.mkdir(parents=True, exist_ok=True)
-    observations.to_csv(analysis_dir / 'figure3de_normalized_observations.csv', index=False)
-    baselines.to_csv(analysis_dir / 'wt_baselines.csv', index=False)
-    data = observations
-    data.to_csv(analysis_dir / 'round_specific_analysis_data.csv', index=False)
+    observations.to_csv(output / 'figure3de_normalized_observations.csv', index=False)
+    baselines.to_csv(output / 'wt_baselines.csv', index=False)
+    data, utopia_bounds = add_utopia_scores(observations)
+    utopia_bounds.to_csv(output / 'utopia_normalization_bounds.csv', index=False)
+    data.to_csv(output / 'round_specific_analysis_data.csv', index=False)
     corr, enrich, curves, selected = evaluate(data, args)
     for name, table in [('correlations', corr), (f'top{args.top_k}_hit_enrichment', enrich),
                         ('topk_curves', curves), (f'top{args.top_k}_selected_memberships', selected)]:
-        table.to_csv(analysis_dir / f'{name}.csv', index=False)
-        for round_number, part in table.groupby('Round'):
-            round_dir = analysis_dir / f'round_{round_number}'
-            round_dir.mkdir(parents=True, exist_ok=True)
-            part.to_csv(round_dir / f'{name}.csv', index=False)
-    plot_results(corr, enrich, curves, args, analysis_dir)
+        table.to_csv(output / f'{name}.csv', index=False)
+    plot_results(corr, curves, output)
     metadata = {'arguments': {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
                 'algorithm': ALGORITHM, 'models': MODEL_IDS, 'prefixes': PREFIXES,
                 'input_sha256': hashlib.sha256(args.input.read_bytes()).hexdigest(),
+                'reused_scored_csv': str(scored_path) if scored_path is not None else None,
+                'scored_csv_sha256': hashlib.sha256(scored_path.read_bytes()).hexdigest() if scored_path else None,
                 'definitions_and_caveats': __doc__}
-    (analysis_dir / 'run_metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+    (output / 'run_metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     print(enrich.to_string(index=False))
-    print(f'Finished. Input unchanged. Results: {analysis_dir}', flush=True)
+    print(f'Finished. Input unchanged. Results: {output}', flush=True)
 
 
 if __name__ == '__main__':
