@@ -8,6 +8,7 @@ __pycache__/
 
 # ignore out files
 *.out
+*json*
 
 # ignore notebook files
 *.ipynb
