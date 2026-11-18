@@ -9,9 +9,10 @@ concatenation. Recall=expected overlap of true and predicted top-k /k, with
 independently uniform ties and k=min(10,n); n<=10 is flagged trivial.
 Optional --in-sample-predictions plus --in-sample-provenance overlays saved
 all-data model predictions on the identical finite OOF cohort. No baseline model
-is created by default. Explicit --train-all-data-baseline --baseline-epochs N
+is created by default. Explicit --train-all-data-baseline
 trains a NEW fixed-epoch all-data reference (10members, oneGPU sequentially),
-without tuning on OOF scores. It saves models and raw predictions for future reuse. All-data metadata is supplied provenance, not proof
+using each round's rounded mean validation-best epoch from the reused run
+(default; --baseline-epochs N overrides all rounds), without tuning on OOF scores. It saves models and raw predictions for future reuse. All-data metadata is supplied provenance, not proof
 of the training process. No dashed line is fabricated if unavailable.
 
 Historical training methodology below describes SOURCE RUNS ONLY. The command
@@ -527,10 +528,54 @@ def compiled_reports(predictions, snapshots, out, reference=None):
     pd.DataFrame(summary).to_csv(out/'compiled_metric_seed_summary.csv',index=False)
 
 
+def baseline_epoch_plan(source, audit, provenance, override=None):
+    """Freeze per-round budgets from one-based validation-selected CV epochs.
+
+    Uses every member of every completed within-snapshot ensemble, equally
+    weighted. Never uses test metrics. Round half up, not Python banker rounding.
+    """
+    if override is not None:
+        return {n:override for n in [1,2,3]}, {'method':'explicit_global_override','epochs':override}
+    path=source/'training_history.csv'
+    if not path.is_file():raise ValueError('Automatic round-average epochs require training_history.csv in --reuse-run; supply it or --baseline-epochs N')
+    history=pd.read_csv(path)
+    required={'experiment','round','protocol','repeat','fold','split_seed','member','best_epoch','checkpoint'}
+    if not required.issubset(history):raise ValueError(f'Training history missing columns: {required-set(history)}')
+    history=history[history.experiment=='within_snapshot'].copy()
+    members=provenance.get('arguments',{}).get('ensemble_size')
+    if not isinstance(members,int) or isinstance(members,bool) or members<1:raise ValueError('Source provenance must specify positive integer arguments.ensemble_size to validate epoch-history completeness')
+    keys=['round','protocol','repeat','fold']
+    completed=audit[audit.status=='completed']
+    expected={tuple(job)+(member,) for job in completed[keys].itertuples(index=False,name=None) for member in range(members)}
+    actual=set(history[keys+['member']].itertuples(index=False,name=None))
+    if not expected or actual!=expected or len(history)!=len(actual):raise ValueError('Training history must contain exactly every member of every completed CV job, with no extras or duplicates')
+    # Link history to saved split identities, not just round filenames.
+    if 'split_seed' not in completed:raise ValueError('Source split audit lacks split_seed provenance')
+    linked=history.merge(completed[keys+['split_seed']],on=keys,how='left',suffixes=('_history','_audit'),validate='many_to_one')
+    if not (linked.split_seed_history==linked.split_seed_audit).all():raise ValueError('Training history split seeds differ from completed run audit')
+    values=pd.to_numeric(history.best_epoch,errors='coerce').to_numpy(float)
+    if not (np.isfinite(values).all() and (values>=1).all() and (values==np.floor(values)).all()):raise ValueError('best_epoch must be positive one-based integer epoch counts')
+    limit=provenance.get('arguments',{}).get('epochs')
+    if limit is not None and (values>int(limit)).any():raise ValueError('Training history best_epoch exceeds source training epoch limit')
+    if history.checkpoint.isna().any() or history.checkpoint.duplicated().any():raise ValueError('Training history needs unique nonempty checkpoint provenance')
+    if any(source.name not in Path(str(v)).parts for v in history.checkpoint):raise ValueError('Training history checkpoint paths do not identify the reused run')
+    history['best_epoch']=values
+    plan={};summary={}
+    for number in [1,2,3]:
+        part=history[history['round']==number]
+        if part.empty:raise ValueError(f'No completed CV model epoch history for round {number}')
+        mean=float(part.best_epoch.mean());plan[number]=int(np.floor(mean+.5))
+        summary[str(number)]={'n_models':len(part),'mean_best_epoch':mean,'epochs':plan[number]}
+    return plan, {'method':'per_round_mean_validation_best_epoch','epoch_indexing':'one_based','rounding':'nearest_integer_half_up',
+                  'history_path':str(path),'history_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
+                  'source_provenance_sha256':hashlib.sha256((source/'provenance.json').read_bytes()).hexdigest(),
+                  'split_audit_sha256':hashlib.sha256((source/'split_audit.csv').read_bytes()).hexdigest(),'rounds':summary}
+
+
 def train_all_data_reference(snapshots,out,args):
     """Explicit opt-in fixed-epoch training on every labeled source row.
 
-    No OOF/test result selects epochs, architecture, member or checkpoint. This
+    Epoch budgets use source CV validation-best epochs, never test metrics. This
     intentionally measures resubstitution fit, never generalization/upper bound.
     """
     import torch
@@ -540,6 +585,7 @@ def train_all_data_reference(snapshots,out,args):
     torch.set_num_threads(args.baseline_cpu_threads);torch.use_deterministic_algorithms(True)
     rows=[];paths=[];hashes={}
     for number,(df,labels,_,sources) in snapshots.items():
+        epochs=args.baseline_epochs_by_round[number]
         y=df[labels].to_numpy(float);mask=np.isfinite(y);active=mask.any(axis=0)
         scale=np.array([max(np.nanmax(np.abs(y[:,j])),1e-12) if active[j] else 1. for j in range(len(labels))])
         targets=torch.tensor(np.where(mask,y/scale,0),dtype=torch.float32)
@@ -555,7 +601,7 @@ def train_all_data_reference(snapshots,out,args):
             optimizer=torch.optim.Adam(model.parameters(),lr=learning_rate,weight_decay=.001)
             generator=torch.Generator().manual_seed(seed)
             print(f'OPT-IN all-data IN-SAMPLE model: round{number} member{member+1}/{args.baseline_members}',flush=True)
-            for epoch in range(args.baseline_epochs):
+            for epoch in range(epochs):
                 model.train()
                 for idx in torch.randperm(len(df),generator=generator).split(batch_size):
                     valid=observed[idx].to(args.baseline_device)
@@ -568,7 +614,7 @@ def train_all_data_reference(snapshots,out,args):
             prediction[:,~active]=np.nan;member_predictions.append(prediction)
             path=out/'all_data_models'/f'round{number}_member{member:02d}.pt';path.parent.mkdir(parents=True,exist_ok=True)
             checkpoint={'state_dict':{k:v.detach().cpu() for k,v in model.state_dict().items()},'training_scope':'all_data',
-                        'epochs':args.baseline_epochs,'learning_rate':learning_rate,'batch_size':batch_size,'seed':seed,'labels':labels,'target_scale':scale.tolist(),
+                        'epochs':epochs,'learning_rate':learning_rate,'batch_size':batch_size,'seed':seed,'labels':labels,'target_scale':scale.tolist(),
                         'active_heads':active.tolist(),'hidden_width':width,'sequence_length':int(x.shape[1]),
                         'training_row_ids':df.row_id.tolist(),'source_snapshot_sha256':hashlib.sha256(sources[0].read_bytes()).hexdigest()}
             with path.open('xb') as handle:torch.save(checkpoint,handle)
@@ -579,7 +625,7 @@ def train_all_data_reference(snapshots,out,args):
         hashes[str(number)]=hashlib.sha256(sources[0].read_bytes()).hexdigest()
         pd.DataFrame(rows).to_csv(out/'all_data_predictions.csv',index=False)
     meta={'training_scope':'all_data','checkpoint_paths':paths,'source_snapshot_sha256':hashes,
-          'source_training_hyperparameters':args.source_hyperparams,'epochs_fixed_in_advance':args.baseline_epochs,'ensemble_members':args.baseline_members,'aggregation':'median',
+          'source_training_hyperparameters':args.source_hyperparams,'epochs_fixed_before_baseline_training_by_round':args.baseline_epochs_by_round,'epoch_selection':args.baseline_epoch_selection,'ensemble_members':args.baseline_members,'aggregation':'median',
           'interpretation':'resubstitution/in-sample reference, NOT a ceiling or generalization'}
     (out/'all_data_provenance.json').write_text(json.dumps(meta,indent=2))
     return pd.DataFrame(rows),meta
@@ -593,14 +639,14 @@ def main():
     p.add_argument('--in-sample-predictions',type=Path,help='Optional RAW-ratio predictions CSV from an already trained all-data model')
     p.add_argument('--in-sample-provenance',type=Path,help='Required with baseline CSV: JSON training_scope=all_data; checkpoint_paths; source_snapshot_sha256 mapping round numbers to hashes')
     p.add_argument('--train-all-data-baseline',action='store_true',help='Explicitly train NEW all-data in-sample reference; never enabled by reuse-run alone')
-    p.add_argument('--baseline-epochs',type=int,help='Required fixed epoch budget when all-data training explicitly requested; no OOF tuning or early stopping')
+    p.add_argument('--baseline-epochs',type=int,help='Optional positive fixed epoch override for ALL rounds; default is each round rounded mean validation-best epoch from source training_history.csv')
     p.add_argument('--baseline-members',type=int,default=10)
     p.add_argument('--baseline-seed',type=int,default=777)
     p.add_argument('--baseline-device',default='cuda:0')
     p.add_argument('--baseline-cpu-threads',type=int,default=4)
     args=p.parse_args()
     if args.train_all_data_baseline and args.in_sample_predictions:p.error('Choose supplied baseline OR explicit all-data training, not both')
-    if args.train_all_data_baseline and (args.baseline_epochs is None or args.baseline_epochs<1 or args.baseline_members<1 or args.baseline_cpu_threads<1):p.error('Explicit all-data training requires positive --baseline-epochs, member and thread counts')
+    if args.train_all_data_baseline and ((args.baseline_epochs is not None and args.baseline_epochs<1) or args.baseline_members<1 or args.baseline_cpu_threads<1):p.error('Explicit all-data training requires positive member/thread counts and any epoch override must be positive')
     if bool(args.in_sample_predictions)!=bool(args.in_sample_provenance):p.error('Baseline predictions and provenance must be supplied together')
     source=args.reuse_run
     provenance=json.loads((source/'provenance.json').read_text())
@@ -645,9 +691,14 @@ def main():
         reference=pd.read_csv(args.in_sample_predictions)
         required={'round','row_id','target','prediction'}
         if not required.issubset(reference) or reference.duplicated(['round','row_id','target']).any():raise ValueError('Baseline requires one raw prediction per round,row_id,target')
+    if args.train_all_data_baseline:
+        args.baseline_epochs_by_round,args.baseline_epoch_selection=baseline_epoch_plan(source,audit,provenance,args.baseline_epochs)
+        print(f'All-data fixed epoch budgets by round: {args.baseline_epochs_by_round}',flush=True)
     base=args.output_dir or args.root/'results/generalization-analysis'
     out=base/('report_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')+'_'+uuid.uuid4().hex[:8]);out.mkdir(parents=True,exist_ok=False)
-    if args.train_all_data_baseline:reference,baseline_meta=train_all_data_reference(snapshots,out,args)
+    if args.train_all_data_baseline:
+        (out/'baseline_epoch_plan.json').write_text(json.dumps(args.baseline_epoch_selection,indent=2))
+        reference,baseline_meta=train_all_data_reference(snapshots,out,args)
     meta={'source_run':str(source),'source_prediction_sha256':hashlib.sha256((source/'predictions.csv').read_bytes()).hexdigest(),
           'script_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'training_executed':args.train_all_data_baseline,'inference_executed':args.train_all_data_baseline,
           'baseline_provenance':baseline_meta,'baseline_label':'in-sample reference, NOT generalization or theoretical ceiling',
