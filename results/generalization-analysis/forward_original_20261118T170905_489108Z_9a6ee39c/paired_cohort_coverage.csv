@@ -1,0 +1,13 @@
+test_round,repeat,analyte,target,status,n,n_observed
+1,0,DVA,titer_delta_mg_L,evaluated,92,92
+1,0,DVA,fraction_delta_pp,evaluated,92,92
+1,0,OA,titer_delta_mg_L,evaluated,92,92
+1,0,OA,fraction_delta_pp,evaluated,92,92
+2,0,DVA,titer_delta_mg_L,evaluated,21,21
+2,0,DVA,fraction_delta_pp,evaluated,22,22
+2,0,OA,titer_delta_mg_L,evaluated,11,11
+2,0,OA,fraction_delta_pp,evaluated,11,11
+3,0,DVA,titer_delta_mg_L,evaluated,10,10
+3,0,DVA,fraction_delta_pp,evaluated,10,10
+3,0,OA,titer_delta_mg_L,evaluated,7,7
+3,0,OA,fraction_delta_pp,evaluated,7,7
