@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
-"""Four-fold generalization analysis; no training without --run.
+"""REUSE-FIRST revision: existing CV predictions; optional opt-in all-data reference.
+
+python scripts/generalization-analysis.py --reuse-run results/generalization-analysis/run_TIMESTAMP
+Pearson/Spearman/top10 recall figures use0..1 axes; sample SD across OOF seeds.
+Top10 recall ranks UNIQUE sequences by mean WT-relative ratio across their
+observed heads. This differs from Pearson/Spearman, which retain assay-level
+concatenation. Recall=expected overlap of true and predicted top-k /k, with
+independently uniform ties and k=min(10,n); n<=10 is flagged trivial.
+Optional --in-sample-predictions plus --in-sample-provenance overlays saved
+all-data model predictions on the identical finite OOF cohort. No baseline model
+is created by default. Explicit --train-all-data-baseline --baseline-epochs N
+trains a NEW fixed-epoch all-data reference (10members, oneGPU sequentially),
+without tuning on OOF scores. It saves models and raw predictions for future reuse. All-data metadata is supplied provenance, not proof
+of the training process. No dashed line is fabricated if unavailable.
+
+Historical training methodology below describes SOURCE RUNS ONLY. The command
+line in this revision no longer accepts --run or repeats CV training. Only the
+explicit --train-all-data-baseline flag enables new in-sample reference training.
+
+Original description: Four-fold generalization analysis; no training without --run.
 
 Environment (Linux NVIDIA server): conda env create -f generalization.yml
   conda activate generalization-analysis
@@ -375,7 +394,21 @@ BASE_RATIOS = ['DVA/C4','DVA/DVO','DVA/(DVA+DVO)','(DVA+DVO)/VDAL',
                'OA/C6','OA/OL','OA/(OA+OL)','(OA+OL)/PDAL']
 
 
-def compiled_reports(predictions, snapshots, out):
+def top10_recall(subset, actual='actual_relative', predicted='predicted_relative'):
+    """Unique-sequence top10 overlap, with independent uniform boundary ties."""
+    finite=subset[np.isfinite(subset[actual])&np.isfinite(subset[predicted])]
+    # One value per sequence/head, then equal-weight available heads per sequence.
+    units=finite.groupby(['sequence_key','target'])[[actual,predicted]].mean().groupby('sequence_key').mean()
+    n=len(units);k=min(10,n)
+    if not n:return {'top10_recall':np.nan,'recall_n_sequences':0,'recall_effective_k':0,'recall_trivial':True}
+    def membership(x):
+        boundary=np.sort(x)[-k];w=(x>boundary).astype(float);tie=x==boundary
+        w[tie]=(k-w.sum())/tie.sum();return w
+    a=membership(units[actual].to_numpy());b=membership(units[predicted].to_numpy())
+    return {'top10_recall':float(a@b/k),'recall_n_sequences':n,'recall_effective_k':k,'recall_trivial':n<=10}
+
+
+def compiled_reports(predictions, snapshots, out, reference=None):
     """Test-only, per-seed OOF reference-style WT-relative ratio comparison."""
     import matplotlib
     matplotlib.use('Agg')
@@ -394,12 +427,18 @@ def compiled_reports(predictions, snapshots, out):
             baselines[number,label]=value if usable else np.nan
             baseline_rows.append(dict(round=number,target=label,wt_raw=value,usable=usable))
     pd.DataFrame(baseline_rows).to_csv(out/'compiled_wt_baselines.csv',index=False)
+    sequence_lookup={(n,r.row_id):r.sequence_key for n,(df,_,_,_) in snapshots.items() for r in df.itertuples()}
+    within['sequence_key']=[sequence_lookup[int(n),rid] for n,rid in zip(within['round'],within.row_id)]
+    if reference is not None:
+        within=within.merge(reference[['round','row_id','target','prediction']].rename(columns={'prediction':'reference_prediction'}),on=['round','row_id','target'],how='left',validate='many_to_one')
+        needed=np.isfinite(within.observed)&np.isfinite(within.prediction)
+        if not np.isfinite(within.loc[needed,'reference_prediction']).all():raise ValueError('Reference must cover EVERY finite OOF observation; no silent cohort shrinkage')
     within['base_ratio']=within.target.str.split('_',n=1).str[1]
     within['wt_baseline']=[baselines[int(r),t] for r,t in zip(within['round'],within.target)]
     within['actual_relative']=within.observed/within.wt_baseline
     within['predicted_relative']=within.prediction/within.wt_baseline
     within.to_csv(out/'compiled_oof_points.csv',index=False)
-    result=[]
+    result=[];reference_rows=[]
     for (number,protocol,repeat),part in within.groupby(['round','protocol','repeat']):
         df,labels,_,_=snapshots[number]
         fig,axes=plt.subplots(1,8,figsize=(19,3.7),squeeze=False)
@@ -414,6 +453,13 @@ def compiled_reports(predictions, snapshots, out):
             context=dict(round=number,protocol=protocol,repeat=repeat,base_ratio=base,
                          seed=int(part.split_seed.iloc[0]))
             stats=metrics(x,y)
+            stats.update(top10_recall(subset))
+            if reference is not None:
+                refpart=subset.loc[good].copy()
+                refpart['reference_relative']=refpart.reference_prediction/refpart.wt_baseline
+                refstats=metrics(refpart.actual_relative.to_numpy(float),refpart.reference_relative.to_numpy(float))
+                refstats.update(top10_recall(refpart,predicted='reference_relative'))
+                reference_rows.append(dict(context,interpretation='IN_SAMPLE_NOT_GENERALIZATION_NOT_CEILING',**refstats))
             result.append(dict(context,scope='pooled_oof',fold=-1,expected_raw=expected_raw,
                                expected_wt_relative=expected_relative,
                                coverage=stats['n']/expected_relative if expected_relative else np.nan,
@@ -443,7 +489,9 @@ def compiled_reports(predictions, snapshots, out):
         plt.close(fig)
     compiled=pd.DataFrame(result);compiled.to_csv(out/'compiled_ratio_metrics.csv',index=False)
     pooled=compiled[compiled.scope=='pooled_oof']
-    for metric in ['pearson','spearman']:
+    pd.DataFrame(reference_rows).to_csv(out/'in_sample_reference_metrics.csv',index=False)
+    summary=[]
+    for metric in ['pearson','spearman','top10_recall']:
         fig,axes=plt.subplots(2,4,figsize=(14,7),squeeze=False)
         for ax,base in zip(axes.flat,BASE_RATIOS):
             for offset,(protocol,color) in enumerate([('cluster','#4477AA'),('random','#AA3377'),('homology','#228833')]):
@@ -452,186 +500,163 @@ def compiled_reports(predictions, snapshots, out):
                     if len(values):
                         x=number+(offset-1)*.2
                         ax.scatter(x+np.linspace(-.035,.035,len(values)),values,s=20,color=color,alpha=.7)
-                        ax.scatter(x,values.mean(),marker='_',s=250,color=color)
-            ax.set(title=base,xticks=[1,2,3],xlabel='Model snapshot',ylabel=metric.title(),ylim=(-1.05,1.05))
+                        sd=float(values.std(ddof=1)) if len(values)>1 else np.nan
+                        ax.errorbar(x,values.mean(),yerr=sd if np.isfinite(sd) else None,fmt='_',markersize=13,color=color,capsize=4)
+                        clipped=int(((values<0)|(values>1)).sum())
+                        if clipped:ax.scatter(x,0,marker='v',color=color,s=35,clip_on=False)
+                        trivial=int(pooled.loc[(pooled.base_ratio==base)&(pooled.protocol==protocol)&(pooled['round']==number),'recall_trivial'].fillna(False).sum()) if metric=='top10_recall' else 0
+                        if trivial:ax.scatter(x,values.mean(),marker='D',facecolors='none',edgecolors=color,s=65)
+                        summary.append(dict(trivial_recall_seeds=trivial,metric=metric,base_ratio=base,protocol=protocol,round=number,n_seeds=len(values),mean=float(values.mean()),sample_sd=sd,clipped_seed_values=clipped))
+                        if reference_rows:
+                            refs=pd.DataFrame(reference_rows)
+                            ref=refs.loc[(refs.base_ratio==base)&(refs.protocol==protocol)&(refs['round']==number),metric].dropna()
+                            if len(ref):
+                                ax.plot([x-.075,x+.075],[ref.mean(),ref.mean()],ls='--',color='black',lw=1.5)
+                                summary[-1]['clipped_reference_values']=int(((ref<0)|(ref>1)).sum())
+                                if (ref<0).any():ax.scatter(x,0,marker='v',color='black',s=40,clip_on=False)
+            ax.set(title=base,xticks=[1,2,3],xlabel='Model snapshot',ylabel=metric.title(),ylim=(0,1))
             ax.axhline(0,color='grey',lw=.6)
         handles=[plt.Line2D([],[],marker='o',ls='',color=c,label=n) for n,c in
                  [('cluster','#4477AA'),('random','#AA3377'),('homology','#228833')]]
-        fig.legend(handles=handles,loc='lower center',ncol=3,frameon=False)
-        fig.suptitle('WT-relative compiled ratios: points=seed OOF correlations; bars=seed means')
+        if reference_rows:handles.append(plt.Line2D([],[],ls='--',color='black',label='All-data in-sample reference (not a ceiling)'))
+        fig.legend(handles=handles,loc='lower center',ncol=2 if reference_rows else 3,frameon=False)
+        fig.suptitle('Points: seed OOF metrics; error bars: mean ± sample SD across seeds\n0–1 display clips negative values/whiskers; triangles flag negatives; hollow diamonds: trivial recall (n≤10)')
         fig.tight_layout(rect=(0,.055,1,.95))
         for ext in ['png','svg']:fig.savefig(out/f'compiled_ratio_{metric}_comparison.{ext}',dpi=300)
         plt.close(fig)
+    pd.DataFrame(summary).to_csv(out/'compiled_metric_seed_summary.csv',index=False)
+
+
+def train_all_data_reference(snapshots,out,args):
+    """Explicit opt-in fixed-epoch training on every labeled source row.
+
+    No OOF/test result selects epochs, architecture, member or checkpoint. This
+    intentionally measures resubstitution fit, never generalization/upper bound.
+    """
+    import torch
+    from torch import nn
+    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG',':4096:8')
+    if args.baseline_device.startswith('cuda') and not torch.cuda.is_available():raise RuntimeError('CUDA unavailable; no CPU fallback')
+    torch.set_num_threads(args.baseline_cpu_threads);torch.use_deterministic_algorithms(True)
+    rows=[];paths=[];hashes={}
+    for number,(df,labels,_,sources) in snapshots.items():
+        y=df[labels].to_numpy(float);mask=np.isfinite(y);active=mask.any(axis=0)
+        scale=np.array([max(np.nanmax(np.abs(y[:,j])),1e-12) if active[j] else 1. for j in range(len(labels))])
+        targets=torch.tensor(np.where(mask,y/scale,0),dtype=torch.float32)
+        observed=torch.tensor(mask);x=torch.tensor([[AA.index(a) for a in seq] for seq in df.Aligned_Sequence],dtype=torch.long)
+        weights=torch.tensor(([.2,1,1,.1] if number==1 else [1,1,1,.1])*(len(labels)//4),device=args.baseline_device)
+        width=args.source_hyperparams.get('hidden_width') or {1:2000,2:65,3:65}[number]
+        learning_rate=float(args.source_hyperparams.get('learning_rate',5e-6));batch_size=int(args.source_hyperparams.get('batch_size',32))
+        member_predictions=[]
+        for member in range(args.baseline_members):
+            seed=args.baseline_seed+1000*number+member;torch.manual_seed(seed)
+            if torch.cuda.is_available():torch.cuda.manual_seed_all(seed)
+            model=nn.Sequential(nn.Embedding(21,16),nn.Flatten(),nn.Linear(x.shape[1]*16,width),nn.Dropout(.2),nn.ReLU(),nn.Linear(width,len(labels))).to(args.baseline_device)
+            optimizer=torch.optim.Adam(model.parameters(),lr=learning_rate,weight_decay=.001)
+            generator=torch.Generator().manual_seed(seed)
+            print(f'OPT-IN all-data IN-SAMPLE model: round{number} member{member+1}/{args.baseline_members}',flush=True)
+            for epoch in range(args.baseline_epochs):
+                model.train()
+                for idx in torch.randperm(len(df),generator=generator).split(batch_size):
+                    valid=observed[idx].to(args.baseline_device)
+                    if not valid.any():continue
+                    loss=(((model(x[idx].to(args.baseline_device))-targets[idx].to(args.baseline_device))**2)*weights*valid).sum()/valid.sum()
+                    if not torch.isfinite(loss):raise RuntimeError('Nonfinite all-data loss')
+                    optimizer.zero_grad();loss.backward();optimizer.step()
+            model.eval()
+            with torch.no_grad():prediction=np.concatenate([model(b.to(args.baseline_device)).cpu().numpy() for b in x.split(batch_size)])*scale
+            prediction[:,~active]=np.nan;member_predictions.append(prediction)
+            path=out/'all_data_models'/f'round{number}_member{member:02d}.pt';path.parent.mkdir(parents=True,exist_ok=True)
+            checkpoint={'state_dict':{k:v.detach().cpu() for k,v in model.state_dict().items()},'training_scope':'all_data',
+                        'epochs':args.baseline_epochs,'learning_rate':learning_rate,'batch_size':batch_size,'seed':seed,'labels':labels,'target_scale':scale.tolist(),
+                        'active_heads':active.tolist(),'hidden_width':width,'sequence_length':int(x.shape[1]),
+                        'training_row_ids':df.row_id.tolist(),'source_snapshot_sha256':hashlib.sha256(sources[0].read_bytes()).hexdigest()}
+            with path.open('xb') as handle:torch.save(checkpoint,handle)
+            paths.append(str(path));del model
+        pred=np.median(member_predictions,axis=0)
+        for i,row in enumerate(df.itertuples()):
+            rows.extend(dict(round=number,row_id=row.row_id,target=label,prediction=pred[i,j]) for j,label in enumerate(labels))
+        hashes[str(number)]=hashlib.sha256(sources[0].read_bytes()).hexdigest()
+        pd.DataFrame(rows).to_csv(out/'all_data_predictions.csv',index=False)
+    meta={'training_scope':'all_data','checkpoint_paths':paths,'source_snapshot_sha256':hashes,
+          'source_training_hyperparameters':args.source_hyperparams,'epochs_fixed_in_advance':args.baseline_epochs,'ensemble_members':args.baseline_members,'aggregation':'median',
+          'interpretation':'resubstitution/in-sample reference, NOT a ceiling or generalization'}
+    (out/'all_data_provenance.json').write_text(json.dumps(meta,indent=2))
+    return pd.DataFrame(rows),meta
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1])
-    p.add_argument('--output-dir',type=Path,help='Output base; default ROOT/results/generalization-analysis. Each invocation creates a new run subfolder.')
-    p.add_argument('--run',action='store_true',help='Explicitly enable model training')
-    p.add_argument('--device',default='cuda');p.add_argument('--cpu-threads',type=int,default=4)
-    p.add_argument('--folds',type=int,default=4);p.add_argument('--repeats',type=int,default=3)
-    p.add_argument('--ensemble-size',type=int,default=10);p.add_argument('--epochs',type=int,default=10000)
-    p.add_argument('--patience',type=int,default=200);p.add_argument('--batch-size',type=int,default=32)
-    p.add_argument('--learning-rate',type=float,default=5e-6);p.add_argument('--hidden-width',type=int)
-    p.add_argument('--seed',type=int,default=777)
-    p.add_argument('--protocols',nargs='+',choices=['cluster','random','homology','parent','forward'],default=['cluster','random','homology'])
+    p.add_argument('--reuse-run',type=Path,required=True,help='Completed run containing predictions.csv and provenance.json')
+    p.add_argument('--output-dir',type=Path,help='Output base; new report subfolder, never overwrite source')
+    p.add_argument('--in-sample-predictions',type=Path,help='Optional RAW-ratio predictions CSV from an already trained all-data model')
+    p.add_argument('--in-sample-provenance',type=Path,help='Required with baseline CSV: JSON training_scope=all_data; checkpoint_paths; source_snapshot_sha256 mapping round numbers to hashes')
+    p.add_argument('--train-all-data-baseline',action='store_true',help='Explicitly train NEW all-data in-sample reference; never enabled by reuse-run alone')
+    p.add_argument('--baseline-epochs',type=int,help='Required fixed epoch budget when all-data training explicitly requested; no OOF tuning or early stopping')
+    p.add_argument('--baseline-members',type=int,default=10)
+    p.add_argument('--baseline-seed',type=int,default=777)
+    p.add_argument('--baseline-device',default='cuda:0')
+    p.add_argument('--baseline-cpu-threads',type=int,default=4)
     args=p.parse_args()
-    if min(args.cpu_threads,args.folds,args.repeats,args.ensemble_size,args.epochs,args.patience,args.batch_size)<1 or args.folds<2:
-        p.error('Positive sizes and at least two folds required')
-    if args.hidden_width is not None and args.hidden_width<1:p.error('Hidden width must be positive')
-    if args.learning_rate<=0:p.error('Learning rate must be positive')
-    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG',':4096:8')
+    if args.train_all_data_baseline and args.in_sample_predictions:p.error('Choose supplied baseline OR explicit all-data training, not both')
+    if args.train_all_data_baseline and (args.baseline_epochs is None or args.baseline_epochs<1 or args.baseline_members<1 or args.baseline_cpu_threads<1):p.error('Explicit all-data training requires positive --baseline-epochs, member and thread counts')
+    if bool(args.in_sample_predictions)!=bool(args.in_sample_provenance):p.error('Baseline predictions and provenance must be supplied together')
+    source=args.reuse_run
+    provenance=json.loads((source/'provenance.json').read_text())
+    args.source_hyperparams=provenance.get('arguments',{})
     snapshots={n:load_snapshot(args.root,n) for n in [1,2,3]}
-    if args.output_dir is None:args.output_dir=args.root/'results/generalization-analysis'
-    args.output_dir.mkdir(parents=True,exist_ok=True)
-    run_name=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')+'_'+uuid.uuid4().hex[:8]
-    out=args.output_dir/('run_'+run_name if args.run else 'plan_'+run_name)
-    out.mkdir(exist_ok=False)
-    print(f'All outputs and models will be saved under: {out}',flush=True)
-    for number,(df,labels,_,_) in snapshots.items():
-        nodes,edges=identity_components(df)
-        nodes.to_csv(out/f'round_{number}_identity98_sequences.csv',index=False)
-        edges.to_csv(out/f'round_{number}_identity98_pair_audit.csv',index=False)
-        df[['row_id','original_id','Enzyme','identity98_group']].to_csv(out/f'round_{number}_identity98_membership.csv',index=False)
-        df[df.Enzyme.duplicated(keep=False)].to_csv(out/f'round_{number}_identity_alias_measurements.csv',index=False)
-    audit_rows=[];split_rows=[];prediction_rows=[];metric_rows=[];training_rows=[];coverage=[]
-    paths=[p for snapshot in snapshots.values() for p in snapshot[3]]
-    provenance={'arguments':{k:str(v) if isinstance(v,Path) else v for k,v in vars(args).items()},
-                'sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths},'methodology':__doc__}
-    provenance['python'] = platform.python_version()
-    provenance['packages'] = {}
-    for package in ['numpy','pandas','scipy','torch','matplotlib','biopython']:
-        try: provenance['packages'][package] = importlib.metadata.version(package)
-        except importlib.metadata.PackageNotFoundError: provenance['packages'][package] = 'not installed'
-    provenance['script_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-    (out/'provenance.json').write_text(json.dumps(provenance,indent=2))
-
-    jobs=[]
-    def flush():
-        for name,rows in [('split_audit',audit_rows),('splits',split_rows),('predictions',prediction_rows),
-                          ('metrics',metric_rows),('training_history',training_rows),('target_coverage',coverage)]:
-            pd.DataFrame(rows).to_csv(out/f'{name}.csv',index=False)
-
-    for n,(df,labels,original,_) in snapshots.items():
-        for protocol in [x for x in args.protocols if x!='forward']:
-            for repeat in range(args.repeats):
-                seed=args.seed+10000*n+1000*repeat
-                context={'experiment':'within_snapshot','round':n,'protocol':protocol,'repeat':repeat,'split_seed':seed}
-                try:
-                    for fold,tr,va,te,error in cv_splits(df,protocol,args.folds,seed):
-                        ctx=dict(context,fold=fold,seed=seed+100*fold)
-                        try:
-                            if error:raise ValueError(error)
-                            info=audit(df,(tr,va,te),protocol)
-                        except ValueError as exc:
-                            audit_rows.append(dict(ctx,status='skipped',reason=str(exc)));continue
-                        row=dict(ctx,status='planned',**info);audit_rows.append(row)
-                        for role,indices in zip(['train','validation','test'],[tr,va,te]):
-                            for i in indices:
-                                split_rows.append(dict(ctx,role=role,position=int(i),Enzyme=df.iloc[i].Enzyme,row_id=df.iloc[i].row_id,original_id=df.iloc[i].original_id,
-                                                       parent=df.iloc[i].parent,Cluster=df.iloc[i].Cluster))
-                        jobs.append((n,df,labels,tr,va,te,ctx,row))
-                except ValueError as exc:audit_rows.append(dict(context,status='skipped',reason=str(exc)))
-    flush()
-    print(f'{len(jobs)} feasible CV ensembles x{args.ensemble_size} models; training={args.run}',flush=True)
-    if args.run:
-        for job_index,(n,df,labels,tr,va,te,ctx,status) in enumerate(jobs):
-            print(f'CV ensemble {job_index+1}/{len(jobs)}: {ctx}',flush=True)
-            try:pred,hist,counts,scale=fit_predict(df,labels,tr,va,df.iloc[te],n,ctx['seed'],args,out/'models'/f'round_{n}_{ctx["protocol"]}_repeat_{ctx["repeat"]}_fold_{ctx["fold"]}')
-            except ValueError as exc:
-                status.update(status='skipped',reason=str(exc));flush();continue
-            training_rows.extend(dict(ctx,**h) for h in hist)
-            coverage.extend(dict(ctx,target=l,training_observations=int(c),scale=float(sc)) for l,c,sc in zip(labels,counts,scale))
-            record(pred,df.iloc[te],labels,ctx,prediction_rows,metric_rows)
-            status['status']='completed';flush()
-    if 'forward' in args.protocols:
-        for n in [1,2]:
-            source,source_labels,_,_=snapshots[n]; nxt,next_labels,_,_=snapshots[n+1]
-            novel=~nxt.Enzyme.isin(source.Enzyme)&~nxt.sequence_key.isin(source.sequence_key)
-            for mode in ['random','parent']:
-                for repeat in range(args.repeats):
-                    seed=args.seed+100000*n+1000*repeat
-                    context={'experiment':f'forward_{n}_to_{n+1}','round':n+1,'protocol':mode,'repeat':repeat,'fold':0,'seed':seed}
-                    try:
-                        g=groups(nxt,mode)
-                        _,test=partition(np.flatnonzero(novel),g,.5,seed)
-                        # Lock all entities in selected test groups, including old relatives.
-                        testgroups=set(g[test]); remaining=np.flatnonzero(~np.isin(g,list(testgroups)))
-                        tr_next,va_next=partition(remaining,g,.15,seed+1)
-                        audit(nxt,(tr_next,va_next,test),mode)
-                        # Remove source identities/sequences and (parent mode) lineages held out.
-                        banned=nxt.iloc[np.flatnonzero(np.isin(g,list(testgroups)))]
-                        keep=~source.Enzyme.isin(banned.Enzyme)&~source.sequence_key.isin(banned.sequence_key)
-                        if mode=='parent':keep &= ~source.parent.isin(banned.parent)
-                        tr_src,va_src=partition(np.flatnonzero(keep),groups(source,mode),.15,seed+2)
-                        if not len(test):raise ValueError('No novel test entities')
-                    except ValueError as exc:
-                        audit_rows.append(dict(context,status='skipped',reason=str(exc)));continue
-                    query=nxt.iloc[test]
-                    for arm,df,labels,tr,va,number in [('frozen_source',source,source_labels,tr_src,va_src,n),('retrained_next',nxt,next_labels,tr_next,va_next,n+1)]:
-                        ctx=dict(context,arm=arm)
-                        audit_rows.append(dict(ctx,status='planned' if not args.run else 'run',n_train=len(tr),n_val=len(va),n_test=len(test)))
-                        for role,frame in [('train',df.iloc[tr]),('validation',df.iloc[va]),('test',query)]:
-                            split_rows.extend(dict(ctx,role=role,Enzyme=r.Enzyme,parent=r.parent) for r in frame.itertuples())
-                        if not args.run:continue
-                        try:pred,hist,counts,scale=fit_predict(df,labels,tr,va,query,number,seed,args,out/'models'/f'forward_{n}_to_{n+1}_{mode}_repeat_{repeat}_{arm}')
-                        except ValueError as exc:
-                            audit_rows.append(dict(ctx,status='skipped',reason=str(exc)));continue
-                        training_rows.extend(dict(ctx,**h) for h in hist)
-                        coverage.extend(dict(ctx,target=l,training_observations=int(c),scale=float(s)) for l,c,s in zip(labels,counts,scale))
-                        mapped=np.full((len(query),len(next_labels)),np.nan)
-                        for j,label in enumerate(next_labels):
-                            if label in labels:mapped[:,j]=pred[:,labels.index(label)]
-                            elif arm=='frozen_source':
-                                matches=[k for k,l in enumerate(labels) if l.split('_',1)[1]==label.split('_',1)[1] and counts[k]>0]
-                                if matches:mapped[:,j]=pred[:,matches].mean(axis=1)
-                        for kind,chosen in [('shared_head',[l for l in next_labels if l in source_labels]),
-                                            ('new_screen_transfer',[l for l in next_labels if l not in source_labels and int(l.split('_',1)[0]) not in [8,9]]),
-                                            ('new_screen_validation',[l for l in next_labels if l not in source_labels and int(l.split('_',1)[0]) in [8,9]])]:
-                            record(mapped[:,[next_labels.index(l) for l in chosen]],query,chosen,dict(ctx,evaluation=kind),prediction_rows,metric_rows)
-                        flush()
-    for name,rows in [('split_audit',audit_rows),('splits',split_rows),('predictions',prediction_rows),('metrics',metric_rows),('training_history',training_rows),('target_coverage',coverage)]:
-        pd.DataFrame(rows).to_csv(out/f'{name}.csv',index=False)
-    if args.run and prediction_rows:
-        predictions=pd.DataFrame(prediction_rows)
-        compiled_reports(predictions,snapshots,out)
-        forward=predictions[predictions.experiment.str.startswith('forward')]
-        paired=[]
-        keys=['experiment','round','protocol','repeat','fold','evaluation','target']
-        if len(forward):
-            for values,part in forward.groupby(keys):
-                pivot=part.pivot(index='row_id',columns='arm',values='prediction')
-                if not {'frozen_source','retrained_next'}.issubset(pivot):continue
-                obs=part.groupby('row_id').observed.first().reindex(pivot.index)
-                valid=np.isfinite(obs)&np.isfinite(pivot).all(axis=1)
-                for arm in ['frozen_source','retrained_next']:
-                    paired.append(dict(zip(keys,values),arm=arm,**metrics(obs[valid].to_numpy(),pivot.loc[valid,arm].to_numpy())))
-        pd.DataFrame(paired).to_csv(out/'paired_forward_metrics.csv',index=False)
-        table=pd.DataFrame(metric_rows)
-        summary_keys=['experiment','round','protocol','repeat','fold']
-        for extra in ['arm','evaluation']:
-            if extra in table:table[extra]=table[extra].fillna('not_applicable');summary_keys.append(extra)
-        macro=table.groupby(summary_keys,dropna=False).agg(spearman=('spearman','mean'),pearson=('pearson','mean'),rmse=('rmse','mean'),valid_spearman_heads=('spearman','count'),observations=('n','sum')).reset_index()
-        macro.to_csv(out/'macro_metrics.csv',index=False)
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        within=macro[macro.experiment=='within_snapshot']
-        fig,ax=plt.subplots(figsize=(8,5))
-        for offset,(protocol,color) in enumerate([('cluster','#4477AA'),('random','#AA3377'),('homology','#228833')]):
-            part=within[within.protocol==protocol]
-            for n in [1,2,3]:
-                values=part[part['round']==n].spearman.dropna()
-                if len(values):
-                    x=n+(offset-1)*.2
-                    ax.scatter(np.full(len(values),x),values,color=color,alpha=.45,s=15)
-                    ax.scatter(x,values.mean(),color=color,marker='_',s=220,label=protocol if n==1 else None)
-        ax.set(xlabel='Model availability snapshot',ylabel='Macro per-head Spearman',xticks=[1,2,3])
-        ax.legend();fig.tight_layout()
-        for ext in ['png','svg']:fig.savefig(out/f'within_snapshot_comparison.{ext}',dpi=300)
-        plt.close(fig)
-    print(f'Saved {"analysis" if args.run else "split plan only; no models trained"}: {out}')
+    # Prevent mixing saved OOF predictions with modified assay tables.
+    for n,item in snapshots.items():
+        snapshot=item[3][0];actual=hashlib.sha256(snapshot.read_bytes()).hexdigest()
+        matches=[v for k,v in provenance.get('sha256',{}).items() if Path(k).name==snapshot.name]
+        if not matches or any(x!=actual for x in matches):raise ValueError(f'Snapshot{n} hash does not match completed run provenance')
+    predictions=pd.read_csv(source/'predictions.csv')
+    required={'experiment','round','protocol','repeat','fold','split_seed','row_id','Enzyme','target','observed','prediction'}
+    if not required.issubset(predictions):raise ValueError(f'Missing saved prediction columns: {required-set(predictions)}')
+    for n,(df,labels,_,_) in snapshots.items():
+        truth=df.set_index('row_id')
+        part=predictions[(predictions.experiment=='within_snapshot')&(predictions['round']==n)]
+        for row in part.itertuples():
+            if row.target not in labels or row.row_id not in truth.index:raise ValueError('Prediction row/head absent from source snapshot')
+            if not np.isclose(row.observed,truth.loc[row.row_id,row.target],equal_nan=True):raise ValueError('Saved observed target differs from source')
+    audit=pd.read_csv(source/'split_audit.csv')
+    split_table=pd.read_csv(source/'splits.csv')
+    audit=audit[audit.experiment=='within_snapshot']
+    if not audit.status.isin(['completed','skipped']).all():raise ValueError('Source run has incomplete/planned CV jobs; refusing partial OOF report')
+    jobkeys=['round','protocol','repeat','fold']
+    if audit.duplicated(jobkeys).any():raise ValueError('Ambiguous source split audit jobs')
+    expected=set()
+    for job in audit[audit.status=='completed'].itertuples():
+        selected=split_table[(split_table.experiment=='within_snapshot')&(split_table['round']==job.round)&(split_table.protocol==job.protocol)&(split_table.repeat==job.repeat)&(split_table.fold==job.fold)&(split_table.role=='test')]
+        if selected.empty:raise ValueError('Completed job lacks saved test membership')
+        for rid in selected.row_id:
+            expected.update((job.round,job.protocol,job.repeat,job.fold,rid,label) for label in snapshots[job.round][1])
+    actual_predictions=predictions[predictions.experiment=='within_snapshot']
+    actual=set(actual_predictions[jobkeys+['row_id','target']].itertuples(index=False,name=None))
+    if actual!=expected or len(actual)!=len(actual_predictions):raise ValueError('Saved predictions do not exactly cover completed-fold test rows/heads')
+    reference=None;baseline_meta=None
+    if args.in_sample_predictions:
+        baseline_meta=json.loads(args.in_sample_provenance.read_text())
+        if baseline_meta.get('training_scope')!='all_data' or not baseline_meta.get('checkpoint_paths'):raise ValueError('Need documented already-trained ALL-DATA reference; original held-out ensembles are not an all-data model')
+        for n,item in snapshots.items():
+            digest=hashlib.sha256(item[3][0].read_bytes()).hexdigest()
+            if baseline_meta.get('source_snapshot_sha256',{}).get(str(n))!=digest:raise ValueError('All-data reference snapshot provenance mismatch')
+        reference=pd.read_csv(args.in_sample_predictions)
+        required={'round','row_id','target','prediction'}
+        if not required.issubset(reference) or reference.duplicated(['round','row_id','target']).any():raise ValueError('Baseline requires one raw prediction per round,row_id,target')
+    base=args.output_dir or args.root/'results/generalization-analysis'
+    out=base/('report_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')+'_'+uuid.uuid4().hex[:8]);out.mkdir(parents=True,exist_ok=False)
+    if args.train_all_data_baseline:reference,baseline_meta=train_all_data_reference(snapshots,out,args)
+    meta={'source_run':str(source),'source_prediction_sha256':hashlib.sha256((source/'predictions.csv').read_bytes()).hexdigest(),
+          'script_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'training_executed':args.train_all_data_baseline,'inference_executed':args.train_all_data_baseline,
+          'baseline_provenance':baseline_meta,'baseline_label':'in-sample reference, NOT generalization or theoretical ceiling',
+          'recall_definition':'unique sequence; mean WT-relative ratio across observed heads; expected independent-tie top-k overlap/k; k=min(10,n); n<=10 trivial',
+          'sd_definition':'sample SD(ddof=1) across seed-level pooled OOF metrics, not folds or ensemble members'}
+    if reference is not None:meta['baseline_prediction_sha256']=hashlib.sha256((args.in_sample_predictions if args.in_sample_predictions else out/'all_data_predictions.csv').read_bytes()).hexdigest()
+    (out/'report_provenance.json').write_text(json.dumps(meta,indent=2))
+    compiled_reports(predictions,snapshots,out,reference)
+    print(f'Reused existing OOF predictions. New all-data baseline trained: {args.train_all_data_baseline}. Reports: {out}',flush=True)
 
 
 if __name__=='__main__':main()
