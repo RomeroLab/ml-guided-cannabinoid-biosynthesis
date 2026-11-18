@@ -1,0 +1,5 @@
+analyte,target,n_observed_sequences,n_common_finite,model1_nonfinite_scores,model2_nonfinite_scores,model3_nonfinite_scores
+OA,titer_delta_mg_L,111,111,0,0,0
+OA,fraction_delta_pp,111,111,0,0,0
+DVA,titer_delta_mg_L,124,124,0,0,0
+DVA,fraction_delta_pp,125,125,0,0,0
