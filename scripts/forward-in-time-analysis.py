@@ -35,6 +35,26 @@ all-arm score cohorts are used for paired comparisons; assay records stay separa
 Architecture changes2000->65 hidden units confound data-only retraining claims.
 This is an ORIGINAL MODEL UPDATE comparison, not a controlled data-only experiment.
 No new seeds or pseudo-replicates are invented: one original ensemble per snapshot.
+Three top10 analyses are exported separately:
+(1) Shared observed-best pooled sequences, separately for each metabolite/endpoint:
+select by mean observed WT-relative change across available rounds. All models
+score the SAME outcome-selected set. This is selection-biased, range-restricted
+retrospective description, NOT validation. Outcome benefits are identical by design. Shared-set plots compare score percentile
+and conditional Pearson/Spearman instead; correlations are undefined when a
+boundary tie requires fractional membership, rather than arbitrarily picking rows.
+(2) Each original model selects its own pooled top10 by its historical fraction
+score. Earlier-round sequences may have been used to train later models; explicit
+seen/unseen flags refer conservatively to ANY original snapshot row, not just fit.
+(3) Each time-eligible model selects within each future-round cohort, with existing
+novelty/chronology. Never apply later models backward and call it prospective.
+Pooled unit is exact full protein sequence. First average duplicate observations
+within a sequence/screen, then equally average available round-relative changes.
+No raw assay values are pooled. Different assay/strain conditions and missing-round
+coverage still make pooled comparisons descriptive, not condition-adjusted effects.
+No observations dropped from the exported long table. Shared and model-selected
+pools use identical finite all-model scores/outcomes per endpoint. Exact ties use
+fractional membership, including unbiased expected maxima; lists can have more
+than10 rows but weights sum to min(10,n). Never pad short cohorts. Export effectivek.
 No inference/training happens on import. All outputs go to unique forward_original_
 subfolder within results/generalization-analysis. Existing files remain untouched.
 """
@@ -181,21 +201,127 @@ def main():
                 coverage.append(dict(ctx,analyte=analyte,heads=json.dumps([labels[j] for j in chosen]),n_heads=len(chosen)))
                 s=next(s for s in SCREENS[test_round] if FAMILY[s]==analyte)
                 for i,row in enumerate(test.itertuples()):
-                    raw=test.iloc[i];predictions.append(dict(ctx,analyte=analyte,row_id=row.row_id,Enzyme=row.Enzyme,score=scores[i],
+                    raw=test.iloc[i];predictions.append(dict(ctx,analyte=analyte,row_id=row.row_id,Enzyme=row.Enzyme,sequence_key=row.sequence_key,score=scores[i],
                         titer_delta_mg_L=(raw[f'{s}_{analyte}']-wt[f'{s}_{analyte}'])*MW[analyte]/1000,
                         fraction_delta_pp=100*(raw[f'{s}_{FRACTION[analyte]}']-wt[f'{s}_{FRACTION[analyte]}'])))
             plan['status']='completed'
             pd.DataFrame(predictions).to_csv(out/'predictions.csv',index=False)
     for name,rows in [('plan',plans),('excluded_prior_variants',exclusions),('future_wt_baselines',baselines),('score_head_coverage',coverage)]:pd.DataFrame(rows).to_csv(out/f'{name}.csv',index=False)
     if predictions:report(pd.DataFrame(predictions),out,h,ties)
+    if args.infer:pooled_top10(df,wt,snapshots,checkpoints,args,out,h,ties)
     print(f'Saved original-model {"inference" if args.infer else "audit only"}: {out}',flush=True)
+
+def pooled_top10(df,wt,snapshots,checkpoints,args,out,h,ties):
+    """Explicitly retrospective pools; not an extension of prospective metrics."""
+    long=[]
+    for test_round,screens in SCREENS.items():
+        for screen in screens:
+            analyte=FAMILY[screen]
+            for row in df[df.hd.between(1,8)&(df.Enzyme!='PKC001.000')].itertuples():
+                raw=df.loc[df.row_id==row.row_id].iloc[0]
+                t=raw[f'{screen}_{analyte}'];f=raw[f'{screen}_{FRACTION[analyte]}']
+                if not np.isfinite(t) and not np.isfinite(f):continue
+                long.append(dict(row_id=row.row_id,Enzyme=row.Enzyme,sequence_key=row.sequence_key,round=test_round,
+                                 analyte=analyte,titer_delta_mg_L=(t-wt[f'{screen}_{analyte}'])*MW[analyte]/1000,
+                                 fraction_delta_pp=100*(f-wt[f'{screen}_{FRACTION[analyte]}'])))
+    observations=pd.DataFrame(long)
+    if observations.empty:return
+    observations.to_csv(out/'pooled_observations_long.csv',index=False)
+    candidates=df[df.sequence_key.isin(observations.sequence_key)].copy()
+    bad=candidates.Aligned_Sequence.str.replace('-','',regex=False)!=candidates.sequence_key
+    if bad.any():raise ValueError(f'Pooled query alignment mismatch: {candidates.loc[bad,"original_id"].tolist()}')
+    ambiguous=candidates.groupby('sequence_key').Aligned_Sequence.nunique()
+    if (ambiguous>1).any():raise ValueError('Same pooled full sequence has multiple aligned representations; resolve upstream')
+    query=candidates.drop_duplicates('sequence_key').copy()
+    aliases=candidates.groupby('sequence_key').Enzyme.agg(lambda x:json.dumps(sorted(set(x))))
+    scores={};flags={}
+    for model_round,(source,labels,split,_) in snapshots.items():
+        badlen=query.Aligned_Sequence.str.len()!=int(source.Aligned_Sequence.str.len().iloc[0])
+        if badlen.any():raise ValueError('Pooled query alignment lengths differ from original model')
+        pred,_,details=predict_original(source,labels,query,checkpoints[model_round],args.device,args.batch_size)
+        (out/f'pooled_model{model_round}_checkpoints.json').write_text(json.dumps(details,indent=2))
+        historical_wt=source[source.Enzyme=='PKC001.000'].iloc[0]
+        seen_sequences=set(source.sequence_key)
+        alias_seen=set(candidates[candidates.Enzyme.isin(source.Enzyme)].sequence_key)
+        flags[model_round]={seq:seq in seen_sequences or seq in alias_seen for seq in query.sequence_key}
+        for analyte in ['OA','DVA']:
+            chosen=[j for j,l in enumerate(labels) if l.split('_',1)[1]==FRACTION[analyte] and np.isfinite(historical_wt[l]) and historical_wt[l]!=0 and source.iloc[split[0]][l].notna().any()]
+            if not chosen:raise ValueError('No calibrated pooled scoring heads')
+            score=np.mean(pred[:,chosen]/np.array([historical_wt[labels[j]] for j in chosen]),axis=1)
+            scores[model_round,analyte]=dict(zip(query.sequence_key,score))
+    selected=[];summary=[];all_candidates=[];pool_coverage=[]
+    for analyte in ['OA','DVA']:
+        for target in ['titer_delta_mg_L','fraction_delta_pp']:
+            # One observation per sequence/round, then equal-weight available rounds.
+            within=observations[observations.analyte==analyte].groupby(['sequence_key','round'])[target].mean().dropna()
+            means=within.groupby('sequence_key').mean();counts=within.groupby('sequence_key').count()
+            table=pd.DataFrame({'observed_mean_delta':means,'rounds_observed':counts})
+            for model_round in [1,2,3]:
+                table[f'model{model_round}_score']=table.index.map(scores[model_round,analyte])
+                table[f'model{model_round}_seen']=table.index.map(flags[model_round])
+            finite=np.isfinite(table[['observed_mean_delta']+[f'model{i}_score' for i in [1,2,3]]].to_numpy(float)).all(axis=1)
+            pool_coverage.append(dict(analyte=analyte,target=target,n_observed_sequences=len(table),n_common_finite=int(finite.sum()),
+                                      **{f'model{i}_nonfinite_scores':int((~np.isfinite(table[f"model{i}_score"])).sum()) for i in [1,2,3]}))
+            table=table[finite];n=len(table);k=min(10,n)
+            for seq,row in table.iterrows():all_candidates.append(dict(analyte=analyte,target=target,sequence_key=seq,Enzymes=aliases.loc[seq],**row.to_dict()))
+            if not n:continue
+            y=table.observed_mean_delta.to_numpy(float)
+            for analysis in ['shared_observed_top10','per_model_predicted_top10']:
+                for model_round in [1,2,3]:
+                    x=table[f'model{model_round}_score'].to_numpy(float)
+                    rank=y if analysis=='shared_observed_top10' else x
+                    w=ties.topk_weights(rank,k)
+                    ctx=dict(analysis=analysis,analyte=analyte,target=target,original_model_round=model_round)
+                    fractional=bool(((w>0)&(w<1)).any())
+                    conditional=h.metrics(y[w>0],x[w>0]) if not fractional else {'pearson':np.nan,'spearman':np.nan}
+                    ctx.update(conditional_pearson=conditional['pearson'],conditional_spearman=conditional['spearman'],
+                               conditional_correlation_status='undefined_fractional_boundary_tie' if fractional else ('outcome_conditioned_descriptive_not_validation' if analysis=='shared_observed_top10' else 'model_selected_descriptive_not_validation'))
+                    # No conditional correlation pretending fractional tied rows are independent.
+                    summary.append(dict(ctx,interpretation='retrospective_outcome_selected' if analysis=='shared_observed_top10' else 'retrospective_mixed_seen_unseen',
+                                        n_candidates=n,requested_k=10,effective_k=k,mean_observed_delta=float(w@y/k),
+                                        max_observed_delta=ties.topk_expected_max(rank,y,k),
+                                        mean_model_score=float(w@x/k),mean_model_score_percentile=float(w@pd.Series(x).rank(method='average',pct=True).to_numpy()/k),selected_seen_weight=float(w@table[f'model{model_round}_seen'].to_numpy(float))))
+                    for i,seq in enumerate(table.index):
+                        if w[i]>0:selected.append(dict(ctx,sequence_key=seq,Enzymes=aliases.loc[seq],observed_mean_delta=y[i],score=x[i],selection_weight=w[i],
+                                                       seen_in_original_snapshot=bool(table.iloc[i][f'model{model_round}_seen']),rounds_observed=int(table.iloc[i].rounds_observed)))
+    pd.DataFrame(pool_coverage).to_csv(out/'pooled_candidate_coverage.csv',index=False)
+    pd.DataFrame(all_candidates).to_csv(out/'pooled_common_candidate_scores.csv',index=False)
+    pd.DataFrame(summary).to_csv(out/'pooled_top10_summary.csv',index=False)
+    pd.DataFrame(selected).to_csv(out/'pooled_top10_memberships.csv',index=False)
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    sums=pd.DataFrame(summary)
+    if sums.empty:return
+    for analysis in ['shared_observed_top10','per_model_predicted_top10']:
+        fig,axes=plt.subplots(2,2,figsize=(10,7))
+        for r,analyte in enumerate(['OA','DVA']):
+            for c,target in enumerate(['titer_delta_mg_L','fraction_delta_pp']):
+                part=sums[(sums.analysis==analysis)&(sums.analyte==analyte)&(sums.target==target)]
+                ax=axes[r,c]
+                if analysis=='shared_observed_top10':
+                    ax.plot(part.original_model_round,part.conditional_pearson,'o-',label='Conditional Pearson')
+                    ax.plot(part.original_model_round,part.conditional_spearman,'s-',label='Conditional Spearman')
+                    ax.plot(part.original_model_round,part.mean_model_score_percentile,'^--',label='Mean score percentile')
+                    ax.set_ylim(-1.05,1.05)
+                else:
+                    ax.plot(part.original_model_round,part.mean_observed_delta,'o--',label='Mean observed change')
+                    ax.plot(part.original_model_round,part.max_observed_delta,'^-',label='Expected maximum change')
+                k=int(part.effective_k.iloc[0]) if len(part) else 0
+                ax.set(title=f'{analyte}: {"Titer" if target=="titer_delta_mg_L" else "Fraction"}; effective k={k}',xlabel='Original model',ylabel='Conditional correlation / percentile' if analysis=='shared_observed_top10' else target,xticks=[1,2,3]);ax.legend(fontsize=8)
+        fig.suptitle(analysis+' (retrospective, not prospective validation)');fig.tight_layout(rect=(0,0,1,.94))
+        for ext in ['png','svg']:fig.savefig(out/f'{analysis}.{ext}',dpi=300)
+        plt.close(fig)
 
 def report(data,out,h,ties):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
-    stats=[];curves=[];cohorts=[]
+    # Collapse repeated measurement rows only within the same sequence/screen.
+    data=data.groupby(['test_round','repeat','analyte','train_through_round','sequence_key'],as_index=False).agg(Enzyme=('Enzyme',lambda x:json.dumps(sorted(set(x)))),score=('score','mean'),titer_delta_mg_L=('titer_delta_mg_L','mean'),fraction_delta_pp=('fraction_delta_pp','mean'))
+    data['row_id']=data.sequence_key
+    stats=[];curves=[];cohorts=[];top10=[];memberships=[]
     colors=['#4477AA','#AA3377','#228833']
     for (test_round,repeat,analyte),part in data.groupby(['test_round','repeat','analyte']):
         required=list(range(test_round))
@@ -211,12 +337,20 @@ def report(data,out,h,ties):
                 x=cohort[cutoff].to_numpy(float)
                 ctx=dict(test_round=test_round,repeat=repeat,analyte=analyte,target=target,train_through_round=cutoff)
                 stats.append(dict(ctx,**h.metrics(outcomes,x)))
-                for k in range(1,len(cohort)+1):
+                if len(cohort):
+                    effective=min(10,len(cohort));w=ties.topk_weights(x,effective)
+                    top10.append(dict(ctx,analysis='prospective_per_round',requested_k=10,effective_k=effective,n_candidates=len(cohort),
+                                      mean_delta=float(w@outcomes/effective),max_delta=ties.topk_expected_max(x,outcomes,effective)))
+                    identities=part.groupby('row_id').Enzyme.first()
+                    memberships.extend(dict(ctx,row_id=rid,Enzyme=identities.loc[rid],score=float(x[i]),observed=float(outcomes[i]),selection_weight=float(w[i])) for i,rid in enumerate(cohort.index) if w[i]>0)
+                for k in range(1,min(10,len(cohort))+1):
                     weights=ties.topk_weights(x,k)
                     curves.append(dict(ctx,k=k,mean_delta=float(weights@outcomes/k),max_delta=ties.topk_expected_max(x,outcomes,k),random_mean=float(outcomes.mean())))
     # Ranking-score scale differs from endpoint units: only correlations are meaningful here.
     metric=pd.DataFrame(stats).drop(columns=['rmse','mae','r2','mse','top10_hit_enrichment','effective_k'],errors='ignore')
     metric.to_csv(out/'forward_correlations.csv',index=False);pd.DataFrame(cohorts).to_csv(out/'paired_cohort_coverage.csv',index=False)
+    pd.DataFrame(top10).to_csv(out/'prospective_top10_summary.csv',index=False)
+    pd.DataFrame(memberships).to_csv(out/'prospective_top10_memberships.csv',index=False)
     curve=pd.DataFrame(curves);curve.to_csv(out/'topk_observed_changes.csv',index=False)
     if curve.empty:return
     for repeat in sorted(curve.repeat.unique()):
